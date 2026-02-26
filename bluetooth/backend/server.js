@@ -30,7 +30,7 @@ const supabaseUrl = process.env.SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY
 let supabase = null
 
-if (supabaseUrl && supabaseUrl !== 'https://your-project.supabase.co') {
+if (supabaseUrl && supabaseKey) {
     supabase = createClient(supabaseUrl, supabaseKey)
     console.log('✅ Supabase connected')
 } else {
@@ -824,8 +824,13 @@ app.post('/api/admin/reset-device/:studentId', verifyToken, async (req, res) => 
     }
 })
 
-app.listen(PORT, () => {
-    console.log(`\n🚀 Geo-Fenced Smart Attendance API running at http://localhost:${PORT}`)
-    console.log(`📍 Haversine geo-fence: 10m strict radius (anti-proxy enforced)`)
-    console.log(`🔐 JWT auth enabled`)
-})
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`\n🚀 Geo-Fenced Smart Attendance API running at http://localhost:${PORT}`)
+        console.log(`📍 Haversine geo-fence: 10m strict radius (anti-proxy enforced)`)
+        console.log(`🔐 JWT auth enabled`)
+    })
+}
+
+// Export the Express API for Vercel Serverless Functions
+module.exports = app;

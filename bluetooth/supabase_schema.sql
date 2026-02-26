@@ -56,15 +56,6 @@ ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS semester TEXT NOT NULL 
 ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS subject TEXT;
 ALTER TABLE attendance_sessions ADD COLUMN IF NOT EXISTS time_slot TEXT;
 
--- Migration for records
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES students(id) ON DELETE CASCADE;
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES attendance_sessions(id) ON DELETE CASCADE;
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS student_lat DOUBLE PRECISION;
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS student_lng DOUBLE PRECISION;
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS distance DOUBLE PRECISION;
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'present';
-ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS timestamp TIMESTAMPTZ DEFAULT NOW();
-
 -- 3. Attendance Records Table
 CREATE TABLE IF NOT EXISTS attendance_records (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -77,6 +68,15 @@ CREATE TABLE IF NOT EXISTS attendance_records (
     timestamp TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_attendance UNIQUE (session_id, student_id)
 );
+
+-- Migration for records (Add columns if they don't exist in older schemas)
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES students(id) ON DELETE CASCADE;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES attendance_sessions(id) ON DELETE CASCADE;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS student_lat DOUBLE PRECISION;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS student_lng DOUBLE PRECISION;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS distance DOUBLE PRECISION;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'present';
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS timestamp TIMESTAMPTZ DEFAULT NOW();
 
 -- RLS Policies (Basic - can be refined)
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;
