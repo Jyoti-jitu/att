@@ -45,25 +45,45 @@ bluetooth/
 
 ---
 
-## ⚡ Getting Started
+## ⚡ Local Development Setup
 
-### 1. Backend (Node.js)
-```bash
-cd backend
-npm install
-npm run dev
-```
-API runs at: http://localhost:5000
+### Prerequisites
+- Node.js installed
+- A free [Supabase](https://supabase.com/) account for the database
 
-### 2. Frontend (React)
-Open a new terminal session.
-```bash
-cd frontend
-npm run dev
-```
-Visit: http://localhost:5173
+### 1. Database Setup (Supabase)
+This project uses Supabase for a permanent, real-time database.
 
-*(Note: The system gracefully falls back to memory/mock arrays if the `.env` Supabase config is missing, allowing immediate local testing!)*
+1. Create a new project on [Supabase.com](https://supabase.com/).
+2. Once your project is created, open the **SQL Editor** from the left-hand menu.
+3. Open `bluetooth/supabase_schema.sql` from this repository, copy all the SQL code, and paste it into the Supabase SQL Editor.
+4. Click **Run**. This will create all the necessary tables (`students`, `teachers`, `attendance_sessions`, `attendance_records`).
+5. Go to your Supabase Project Settings -> API to find your keys.
+
+### 2. Backend Config (`/backend`)
+1. Open terminal and type `cd backend`
+2. Run `npm install`
+3. Create a `.env` file in the `backend` folder and add your Supabase keys:
+   ```env
+   PORT=5000
+   SUPABASE_URL=https://your-project-url.supabase.co
+   SUPABASE_SERVICE_KEY=your_supabase_service_role_key
+   JWT_SECRET=your_super_secret_jwt_key
+   ```
+4. Start the backend: `npm run dev`
+
+### 3. Frontend Config (`/frontend`)
+1. Open a *new* terminal and type `cd frontend`
+2. Run `npm install`
+3. Create a `.env` file in the `frontend` folder:
+   ```env
+   VITE_API_URL=http://localhost:5000
+   VITE_SUPABASE_URL=https://your-project-url.supabase.co
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+4. Start the frontend: `npm run dev`
+
+*(Note: If you skip the Supabase setup, the system will gracefully fall back to "Mock Mode" using temporary memory, which is great for quick local demos but won't save data permanently!)*
 
 ---
 
@@ -103,26 +123,30 @@ This system uses multi-layer verification to reduce proxy attendance by approxim
 
 ---
 
-## 🔧 Environment Variables
+## 🚀 Production Deployment (Vercel)
 
-### Frontend (`.env`)
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
+GeoAttend is fully configured to be deployed on Vercel's serverless infrastructure. Vercel requires you to deploy the Frontend and Backend as **two separate projects**.
 
-### Backend (`backend/.env`)
-```
-PORT=5000
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your-service-role-key
-JWT_SECRET=your-super-secret-jwt-key
-```
+### Step 1: Deploying the Backend
+1. Go to your [Vercel Dashboard](https://vercel.com/dashboard) and click **Add New > Project**.
+2. Import your GitHub repository.
+3. In the "Root Directory" settings, click `Edit` and select the **`backend`** folder.
+4. Go to **Environment Variables** and add:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_KEY`
+   - `JWT_SECRET`
+5. Click **Deploy**.
+6. Once deployed, copy your new backend URL (e.g., `https://geoattend-backend.vercel.app`).
 
----
+### Step 2: Deploying the Frontend
+1. Go back to your Vercel Dashboard and click **Add New > Project** again.
+2. Import the exact same repository.
+3. In the "Root Directory" settings, click `Edit` and select the **`frontend`** folder.
+4. Ensure the Framework Preset is detected as **Vite**.
+5. Go to **Environment Variables** and add:
+   - `VITE_API_URL` → *(Paste your backend URL from Step 1 here!)*
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+6. Click **Deploy**.
 
-## 🗄️ Supabase Setup (Production Deployment)
-
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Run the provided `supabase_schema.sql` inside the Supabase SQL Editor to spin up the tables (`students`, `teachers`, `attendance_sessions`, `attendance_records`).
-3. Copy your project URL and keys to the `.env` files.
+Congratulations! Your Smart Attendance System is now live!
