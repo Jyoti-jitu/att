@@ -122,9 +122,8 @@ const TeacherDashboard = () => {
             setShowMapPicker(true);
             toast.success('Estimated position locked. Fine-tune on map.');
         } catch (err) {
-            setManualLocation({ lat: 12.9716, lng: 77.5946 });
-            setShowMapPicker(true);
-            toast.error('GPS error. Setting default campus pins.');
+            // Do NOT set a fake fallback location if GPS fails
+            toast.error(`GPS Error: ${err.message || 'Could not fetch location'}`);
         } finally {
             setCalibrating(false);
         }
@@ -132,11 +131,18 @@ const TeacherDashboard = () => {
 
     useEffect(() => {
         fetchHistory();
-        // Optimization: Pre-fetch location seamlessly when dashboard opens
-        if (navigator.geolocation && !isDemoMode) {
+        // Auto-fetch location when dashboard opens
+        if (navigator.geolocation && !isDemoMode && !manualLocation) {
+            setCalibrating(true);
             getCurrentLocation().then(loc => {
-                setManualLocation(prev => prev || { lat: loc.lat, lng: loc.lng });
-            }).catch(err => console.warn('Early GPS pre-fetch failed:', err));
+                setManualLocation({ lat: loc.lat, lng: loc.lng });
+                toast.success('Location synced automatically.');
+            }).catch(err => {
+                console.warn('Auto GPS fetch failed:', err);
+                toast.error(`Auto-Sync GPS Error: ${err.message || 'Could not fetch location'}`);
+            }).finally(() => {
+                setCalibrating(false);
+            });
         }
     }, [isDemoMode]);
 
