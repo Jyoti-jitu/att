@@ -42,29 +42,6 @@ const Login = () => {
 
             const data = await res.json();
 
-            if (res.status === 409) {
-                toast((t) => (
-                    <div style={{ color: '#fff' }}>
-                        <p style={{ fontWeight: 800, fontSize: '0.9rem', marginBottom: '4px' }}>Session Active</p>
-                        <p style={{ fontSize: '0.8rem', opacity: 0.8, marginBottom: '12px' }}>This account is logged in elsewhere. Join here?</p>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                                onClick={() => { toast.dismiss(t.id); handleSubmit(null, true); }}
-                                style={{ background: '#fff', color: themeColor, border: 'none', padding: '4px 12px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
-                            >
-                                Force Login
-                            </button>
-                            <button
-                                onClick={() => toast.dismiss(t.id)}
-                                style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '4px 12px', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                ), { duration: 6000, style: { background: themeColor, minWidth: '250px' } });
-                return;
-            }
 
             if (res.ok) {
                 toast.success('Access Granted. Redirecting...');

@@ -347,13 +347,6 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) return res.status(401).json({ error: 'Invalid password' })
 
-    // Check for concurrent session (Student only)
-    if (role === 'student' && user.current_session_token && !forceLogin) {
-        return res.status(409).json({
-            error: 'Account already logged in on another device',
-            details: 'This account has an active session. Do you want to terminate other sessions and log in here?'
-        })
-    }
 
     // 0. Check if student is currently blocked
     if (user.blocked_until) {
@@ -369,13 +362,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     const session_token = require('crypto').randomUUID()
 
-    // Update session token
-    if (role === 'student') {
-        user.current_session_token = session_token;
-        if (supabase) {
-            await supabase.from('students').update({ current_session_token: session_token }).eq('id', user.id);
-        }
-    }
 
     const token = signToken({ id: user.id, email: user.email, role: user.role, branch: user.branch, section: user.section, semester: user.semester, session_token })
 
@@ -385,6 +371,20 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     res.json({ token, user: { ...user, password_hash: undefined, remaining_block_seconds } })
+})
+
+// Logout Route (Clear session lock)
+app.post('/api/auth/logout', verifyToken, async (req, res) => {
+    const { id, role } = req.user
+    if (role === 'student') {
+        if (supabase) {
+            await supabase.from('students').update({ current_session_token: null }).eq('id', id)
+        } else {
+            const student = mockStudents.find(s => s.id === id)
+            if (student) student.current_session_token = null
+        }
+    }
+    res.json({ success: true, message: 'Logged out successfully' })
 })
 
 // Start Attendance (Teacher)
@@ -552,10 +552,6 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         }
     }
 
-    // Single Session Invalidation (Anti-Bypass)
-    if (studentInfo.current_session_token !== incoming_session_token) {
-        return res.status(401).json({ error: 'Session invalidated. Logged in from another device.' })
-    }
 
     // Device binding checks removed.
 
@@ -636,6 +632,91 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         record.id = Date.now().toString()
         mockRecords.push(record)
         return res.json({ message: 'Attendance marked present! (Mock Mode)', record })
+    }
+})
+
+// Get overall attendance summary for student
+app.get('/api/attendance/summary', verifyToken, async (req, res) => {
+    if (req.user.role !== 'student') return res.status(403).json({ error: 'Forbidden' })
+    const student_id = req.user.id
+    const semester_filter = req.query.semester
+    const { branch, section } = req.user
+
+    if (supabase) {
+        // 1. Fetch all matching sessions
+        let sessionsQuery = supabase.from('attendance_sessions')
+            .select('*')
+            .eq('branch', branch)
+            .eq('section', section)
+
+        if (semester_filter) {
+            sessionsQuery = sessionsQuery.eq('semester', semester_filter)
+        }
+
+        const { data: sessions, error: sError } = await sessionsQuery
+        if (sError) return res.status(400).json({ error: sError.message })
+
+        // 2. Fetch all student's attendance records
+        const { data: records, error: rError } = await supabase.from('attendance_records')
+            .select('session_id')
+            .eq('student_id', student_id)
+
+        if (rError) return res.status(400).json({ error: rError.message })
+
+        const attendedSessionIds = new Set(records.map(r => r.session_id))
+
+        // 3. Process data
+        const summaryMap = {}
+        sessions.forEach(session => {
+            const subject = session.subject || 'General'
+            if (!summaryMap[subject]) {
+                summaryMap[subject] = {
+                    subject,
+                    total: 0,
+                    attended: 0,
+                    type: (subject.toLowerCase().includes('lab') || subject.toLowerCase().includes('practical')) ? 'PRACTICAL/LAB' : 'THEORY'
+                }
+            }
+            summaryMap[subject].total += 1
+            if (attendedSessionIds.has(session.id)) {
+                summaryMap[subject].attended += 1
+            }
+        })
+
+        const subjects = Object.values(summaryMap).map(s => ({
+            ...s,
+            percentage: s.total > 0 ? (s.attended / s.total * 100).toFixed(1) : "0.0"
+        }))
+
+        // Totals calculation
+        const stats = {
+            total: { t: 0, a: 0 },
+            theory: { t: 0, a: 0 },
+            lab: { t: 0, a: 0 }
+        }
+
+        subjects.forEach(s => {
+            stats.total.t += s.total
+            stats.total.a += s.attended
+            if (s.type === 'THEORY') {
+                stats.theory.t += s.total
+                stats.theory.a += s.attended
+            } else {
+                stats.lab.t += s.total
+                stats.lab.a += s.attended
+            }
+        })
+
+        const getPct = (o) => o.t > 0 ? (o.a / o.t * 100).toFixed(2) : "0.00"
+
+        return res.json({
+            subjects,
+            overall_pct: getPct(stats.total),
+            theory_pct: getPct(stats.theory),
+            lab_pct: getPct(stats.lab)
+        })
+    } else {
+        return res.json({ subjects: [], overall_pct: "0.00", theory_pct: "0.00", lab_pct: "0.00" })
     }
 })
 

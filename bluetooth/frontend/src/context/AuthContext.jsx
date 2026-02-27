@@ -29,11 +29,23 @@ export const AuthProvider = ({ children }) => {
         } catch (err) { console.error('Refresh user error:', err); }
     };
 
-    const logout = () => {
-        setUser(null);
-        setToken(null);
-        localStorage.removeItem('user');
-        localStorage.removeItem('token');
+    const logout = async () => {
+        try {
+            if (token) {
+                const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+                await fetch(`${API}/api/auth/logout`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            }
+        } catch (err) {
+            console.error('Logout sync error:', err);
+        } finally {
+            setUser(null);
+            setToken(null);
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+        }
     };
 
     return (
