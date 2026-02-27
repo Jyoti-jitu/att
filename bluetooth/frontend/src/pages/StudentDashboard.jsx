@@ -5,7 +5,8 @@ import { getCurrentLocation, getDistance } from '../lib/geo';
 import {
     User, Smartphone, Wifi, MapPin, ShieldCheck, LogOut, Zap,
     Target, CheckCircle2, AlertCircle, Loader2, Clock, BookOpen,
-    Navigation, Radio, XCircle, Lock, GraduationCap, Users, Crosshair
+    Navigation, Radio, XCircle, Lock, GraduationCap, Users, Crosshair,
+    RefreshCw, Printer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -529,12 +530,18 @@ const StudentDashboard = () => {
                                         <select value={selectedSemester} onChange={e => setSelectedSemester(e.target.value)} style={{ padding: '0.5rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                                             {[1, 2, 3, 4, 5, 6, 7, 8].map(s => <option key={s} value={s}>Sem {s}</option>)}
                                         </select>
-                                        <button onClick={fetchSummary} disabled={fetchingSummary} style={{ padding: '0.5rem 1rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '8px' }}>{fetchingSummary ? '...' : 'Refresh'}</button>
+                                        <button onClick={fetchSummary} disabled={fetchingSummary} style={{ padding: '0.5rem 1.25rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, cursor: fetchingSummary ? 'not-allowed' : 'pointer', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)', transition: 'all 0.2s', opacity: fetchingSummary ? 0.7 : 1 }}>
+                                            <RefreshCw size={16} className={fetchingSummary ? "animate-spin" : ""} />
+                                            {fetchingSummary ? 'Loading...' : 'View'}
+                                        </button>
                                     </div>
                                 </div>
                                 {showReport && summaryData ? (
                                     <>
-                                        <button onClick={() => window.print()} style={{ width: '100%', padding: '0.75rem', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '12px', color: '#475569', fontWeight: 700, marginBottom: '1.5rem' }}>Print Report</button>
+                                        <button onClick={() => window.print()} style={{ width: '100%', padding: '0.875rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', color: '#334155', fontWeight: 700, marginBottom: '1.5rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }} onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.borderColor = '#cbd5e1'; }} onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#e2e8f0'; }}>
+                                            <Printer size={18} color="#64748b" />
+                                            Print Detailed Report
+                                        </button>
                                         <div style={{ border: '2px solid #e2e8f0', borderRadius: '16px', overflow: 'hidden' }}>
                                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                 <thead>
