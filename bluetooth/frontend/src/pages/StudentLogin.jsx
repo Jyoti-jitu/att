@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { MapPin, Users, Mail, Eye, EyeOff, AlertCircle, ArrowLeft, GraduationCap } from 'lucide-react'
+import { MapPin, Users, Mail, Eye, EyeOff, AlertCircle, ArrowLeft, GraduationCap, Lock } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
@@ -18,35 +19,52 @@ export default function StudentLogin() {
     const [password, setPassword] = useState('student123')
     const [showPassword, setShowPassword] = useState(false)
     const [loading, setLoading] = useState(false)
-    const [error, setError] = useState('')
 
-    const handleSubmit = async e => {
-        e.preventDefault()
-        setError('')
+    const handleSubmit = async (e, force = false) => {
+        if (e) e.preventDefault()
         setLoading(true)
         try {
-            let deviceId = localStorage.getItem('deviceId');
-            if (!deviceId) {
-                deviceId = crypto.randomUUID();
-                localStorage.setItem('deviceId', deviceId);
-            }
-
             const res = await fetch(`${API}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password, role: 'student', deviceId })
+                body: JSON.stringify({ email, password, role: 'student', forceLogin: force })
             });
 
             const data = await res.json();
 
+            if (res.status === 409) {
+                toast((t) => (
+                    <div className="text-white">
+                        <p className="font-bold mb-1 text-sm">Active Session Found</p>
+                        <p className="text-xs mb-3 opacity-80">Another device is logged in. Terminate and sign in here?</p>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => { toast.dismiss(t.id); handleSubmit(null, true); }}
+                                className="bg-white text-primary-900 px-3 py-1 rounded text-xs font-bold"
+                            >
+                                Yes
+                            </button>
+                            <button
+                                onClick={() => toast.dismiss(t.id)}
+                                className="bg-white/20 text-white px-3 py-1 rounded text-xs"
+                            >
+                                No
+                            </button>
+                        </div>
+                    </div>
+                ), { duration: 6000, style: { background: '#1e3a8a', padding: '16px' } });
+                return;
+            }
+
             if (res.ok) {
+                toast.success('Signed in successfully!');
                 login(data.user, data.token);
                 navigate('/student/dashboard');
             } else {
-                setError(data.error);
+                toast.error(data.error || 'Invalid credentials');
             }
         } catch (err) {
-            setError('Connection failed. Is the server running?');
+            toast.error('Connection failure. Check server status.');
         } finally {
             setLoading(false)
         }
@@ -96,12 +114,7 @@ export default function StudentLogin() {
                         </div>
                     </div>
 
-                    {error && (
-                        <div className="flex items-center gap-2 bg-danger-500/15 border border-danger-500/30 
-                            rounded-xl p-3 mb-5 text-danger-400 text-sm">
-                            <AlertCircle size={16} /> {error}
-                        </div>
-                    )}
+
 
                     <form id="student-login-form" onSubmit={handleSubmit} className="space-y-5">
                         <div>

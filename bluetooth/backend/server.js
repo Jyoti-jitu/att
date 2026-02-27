@@ -4,7 +4,7 @@ const dotenv = require('dotenv')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const { createClient } = require('@supabase/supabase-js')
-const twilio = require('twilio')
+
 
 dotenv.config()
 
@@ -21,7 +21,14 @@ app.get('/', (req, res) => {
         status: '✅ GeoAttend Backend is running',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
-        endpoints: ['/api/auth/login', '/api/sessions/active', '/api/attendance/mark']
+        endpoints: [
+            '/api/auth/login',
+            '/api/auth/register',
+            '/api/auth/send-otp',
+            '/api/auth/verify-otp',
+            '/api/sessions/active',
+            '/api/attendance/mark'
+        ]
     })
 })
 
@@ -37,21 +44,7 @@ if (supabaseUrl && supabaseKey) {
     console.log('⚠️ Supabase not configured - running in mock mode')
 }
 
-// --- Twilio Config ---
-const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
-const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
-let twilioClient = null;
 
-if (twilioAccountSid && twilioAuthToken && twilioAccountSid !== 'your_sid') {
-    try {
-        twilioClient = twilio(twilioAccountSid, twilioAuthToken);
-        console.log('✅ Twilio SMS Service initialized');
-    } catch (err) {
-        console.log('❌ Twilio initialization failed:', err.message);
-    }
-} else {
-    console.log('⚠️ Twilio SID/Token missing - SMS will run in MOCK mode');
-}
 
 // --- JWT Helper ---
 const JWT_SECRET = process.env.JWT_SECRET || 'geo-fence-secret-key'
@@ -162,76 +155,92 @@ let mockRecords = []
 
 // --- Routes ---
 
-const otpStore = {}; // Memory cache for OTPs (Ideally use Redis in Production)
 
-// Send OTP via Twilio
-app.post('/api/auth/send-otp', async (req, res) => {
-    const normalizePhone = (p) => p ? String(p).replace(/\s+/g, '') : '';
-    const phone = normalizePhone(req.body.phone);
-    if (!phone) return res.status(400).json({ error: 'Phone number is required' });
 
-    // Generate 6 digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otpStore[phone] = otp;
-
-    console.log(`Sending OTP ${otp} to ${phone}`);
-
-    try {
-        if (!twilioClient) {
-            console.log(`[MOCK SMS] To: ${phone} | Code: ${otp}`);
-            return res.json({ message: `Mock OTP ${otp} sent to ${phone}`, success: true });
-        }
-
-        // Robust Phone Normalization for Twilio
-        let formattedPhone = phone;
-        if (!formattedPhone.startsWith('+')) {
-            // If it's a 10 digit number, assume +91
-            if (formattedPhone.length === 10) {
-                formattedPhone = '+91' + formattedPhone;
-            } else {
-                // Otherwise user should provide country code
-                return res.status(400).json({ error: 'Please provide phone number with country code (e.g. +91...)' });
-            }
-        }
-
-        await twilioClient.messages.create({
-            body: `[GeoAttend] Your verification code is: ${otp}. Do not share this with anyone.`,
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: formattedPhone
-        });
-
-        console.log(`✅ Real SMS sent to ${formattedPhone}`);
-        res.json({ message: 'OTP sent successfully', success: true });
-    } catch (error) {
-        console.error('Twilio Error:', error);
-        res.status(500).json({ error: 'Failed to send OTP via SMS.' });
-    }
-});
-
-app.post('/api/auth/verify-otp', (req, res) => {
-    const normalizePhone = (p) => p ? String(p).replace(/\s+/g, '') : '';
-    const phone = normalizePhone(req.body.phone);
-    const { otp } = req.body;
-
-    // Normalize phone incoming from frontend just in case 
-    // Usually it sends without +91, but we stored it without +91 as well, so let's verify exact Match
-    if (otpStore[phone] && otpStore[phone] === otp) {
-        delete otpStore[phone]; // Clear after verified
-        res.json({ success: true, message: 'OTP Verified' });
-    } else {
-        res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
-    }
-});
+// --- Email Config (Resend) ---
+const { Resend } = require('resend')
+const resend = new Resend(process.env.RESEND_API_KEY)
+const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev'
+// Note: If you have a verified domain, set SENDER_EMAIL in .env to an email at that domain.
+const otpStore = new Map() // email -> { otp, expiry }
 
 // Registration (Student)
+app.post('/api/auth/send-otp', async (req, res) => {
+    const { email } = req.body
+    if (!email) return res.status(400).json({ error: 'Email is required' })
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const expiry = Date.now() + 10 * 60 * 1000 // 10 minutes
+    otpStore.set(email, { otp, expiry })
+
+    const isResendConfigured = process.env.RESEND_API_KEY &&
+        process.env.RESEND_API_KEY !== 're_YOUR_RESEND_KEY_HERE';
+
+    console.log(`[AUTH] Sending OTP for ${email}: ${otp}`)
+
+    if (isResendConfigured) {
+        // Send email in background so the user gets an immediate response
+        res.json({ message: 'Verification code sent!' });
+
+        (async () => {
+            try {
+                console.log(`[AUTH] Background: Sending OTP to ${email} from ${SENDER_EMAIL}...`);
+                const { data, error } = await resend.emails.send({
+                    from: `GeoAttend <${SENDER_EMAIL}>`,
+                    to: email,
+                    subject: 'Verify your Student Account',
+                    html: `
+                        <div style="font-family: sans-serif; max-width: 400px; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                            <h2 style="color: #2563eb;">Verification Code</h2>
+                            <p>Use code below to complete registration:</p>
+                            <div style="background: #f4f7ff; padding: 20px; text-align: center; border-radius: 8px;">
+                                <span style="font-size: 32px; font-weight: 800; letter-spacing: 5px; color: #1e3a8a;">${otp}</span>
+                            </div>
+                            <p style="font-size: 12px; color: #666; margin-top: 20px;">Expired in 10 minutes.</p>
+                        </div>
+                    `
+                });
+
+                if (error) {
+                    console.error('[AUTH] Background Resend Error:', error);
+                } else {
+                    console.log(`[AUTH] Background Email Success ID: ${data.id}`);
+                }
+            } catch (err) {
+                console.error('[AUTH] Background Unexpected Error:', err);
+            }
+        })();
+    } else {
+        console.log(`[DEV MODE] OTP for ${email}: ${otp}`);
+        res.json({ message: 'OTP generated (Mock Mode - check server console)', otp });
+    }
+})
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+    const { email, otp } = req.body
+    const record = otpStore.get(email)
+
+    if (!record || record.otp !== otp || Date.now() > record.expiry) {
+        return res.status(400).json({ error: 'Invalid or expired OTP' })
+    }
+
+    res.json({ message: 'OTP verified successfully', success: true })
+})
+
 app.post('/api/auth/register', async (req, res) => {
     const {
         name, roll_no, mobile, branch, semester, section,
-        email, parent_mobile, password
+        email, parent_mobile, password, otp
     } = req.body
 
-    if (!name || !roll_no || !email || !password || !mobile || !branch || !semester || !section) {
-        return res.status(400).json({ error: 'All primary fields are required' })
+    if (!name || !roll_no || !email || !password || !mobile || !branch || !semester || !section || !otp) {
+        return res.status(400).json({ error: 'All fields including OTP are required' })
+    }
+
+    // Verify OTP one last time during registration
+    const record = otpStore.get(email)
+    if (!record || record.otp !== otp || Date.now() > record.expiry) {
+        return res.status(400).json({ error: 'Invalid or expired OTP. Please verify again.' })
     }
 
     const password_hash = await bcrypt.hash(password, 10)
@@ -247,10 +256,12 @@ app.post('/api/auth/register', async (req, res) => {
             if (error.code === '23505') return res.status(400).json({ error: 'Email or Roll Number already exists' })
             return res.status(400).json({ error: error.message })
         }
+        otpStore.delete(email)
         return res.json({ message: 'Registration successful', student: data[0] })
     } else {
         const student = { id: Date.now().toString(), ...studentData }
         mockStudents.push(student)
+        otpStore.delete(email)
         return res.json({ message: 'Registration successful (Mock Mode)', student })
     }
 })
@@ -319,7 +330,7 @@ app.get('/api/auth/me', verifyToken, async (req, res) => {
 
 // Unified Login
 app.post('/api/auth/login', async (req, res) => {
-    const { email, password, role } = req.body
+    const { email, password, role, forceLogin } = req.body
     let user;
 
     if (supabase) {
@@ -336,6 +347,7 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) return res.status(401).json({ error: 'Invalid password' })
 
+
     // 0. Check if student is currently blocked
     if (user.blocked_until) {
         const blockEnds = new Date(user.blocked_until).getTime();
@@ -348,20 +360,8 @@ app.post('/api/auth/login', async (req, res) => {
         }
     }
 
-    // 1. (Security note: Students can always login to check their dashboard now)
-
-    // Unified Login logic without device binding
-
-
     const session_token = require('crypto').randomUUID()
 
-    // Single Session Control
-    if (role === 'student') {
-        user.current_session_token = session_token;
-        if (supabase) {
-            await supabase.from('students').update({ current_session_token: session_token }).eq('id', user.id);
-        }
-    }
 
     const token = signToken({ id: user.id, email: user.email, role: user.role, branch: user.branch, section: user.section, semester: user.semester, session_token })
 
@@ -371,6 +371,20 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     res.json({ token, user: { ...user, password_hash: undefined, remaining_block_seconds } })
+})
+
+// Logout Route (Clear session lock)
+app.post('/api/auth/logout', verifyToken, async (req, res) => {
+    const { id, role } = req.user
+    if (role === 'student') {
+        if (supabase) {
+            await supabase.from('students').update({ current_session_token: null }).eq('id', id)
+        } else {
+            const student = mockStudents.find(s => s.id === id)
+            if (student) student.current_session_token = null
+        }
+    }
+    res.json({ success: true, message: 'Logged out successfully' })
 })
 
 // Start Attendance (Teacher)
@@ -510,7 +524,7 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
     if (supabase) {
         const { data, error } = await supabase
             .from('students')
-            .select('id, current_session_token, email, blocked_until')
+            .select('id, current_session_token, email, name, roll_no, branch, section, semester, blocked_until')
             .eq('id', student_id)
             .single()
 
@@ -538,10 +552,6 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         }
     }
 
-    // Single Session Invalidation (Anti-Bypass)
-    if (studentInfo.current_session_token !== incoming_session_token) {
-        return res.status(401).json({ error: 'Session invalidated. Logged in from another device.' })
-    }
 
     // Device binding checks removed.
 
@@ -666,6 +676,91 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         return res.json({ message: 'Attendance marked present! (Mock Mode)', record: mockRecord });
     }
 });
+
+// Get overall attendance summary for student
+app.get('/api/attendance/summary', verifyToken, async (req, res) => {
+    if (req.user.role !== 'student') return res.status(403).json({ error: 'Forbidden' })
+    const student_id = req.user.id
+    const semester_filter = req.query.semester
+    const { branch, section } = req.user
+
+    if (supabase) {
+        // 1. Fetch all matching sessions
+        let sessionsQuery = supabase.from('attendance_sessions')
+            .select('*')
+            .eq('branch', branch)
+            .eq('section', section)
+
+        if (semester_filter) {
+            sessionsQuery = sessionsQuery.eq('semester', semester_filter)
+        }
+
+        const { data: sessions, error: sError } = await sessionsQuery
+        if (sError) return res.status(400).json({ error: sError.message })
+
+        // 2. Fetch all student's attendance records
+        const { data: records, error: rError } = await supabase.from('attendance_records')
+            .select('session_id')
+            .eq('student_id', student_id)
+
+        if (rError) return res.status(400).json({ error: rError.message })
+
+        const attendedSessionIds = new Set(records.map(r => r.session_id))
+
+        // 3. Process data
+        const summaryMap = {}
+        sessions.forEach(session => {
+            const subject = session.subject || 'General'
+            if (!summaryMap[subject]) {
+                summaryMap[subject] = {
+                    subject,
+                    total: 0,
+                    attended: 0,
+                    type: (subject.toLowerCase().includes('lab') || subject.toLowerCase().includes('practical')) ? 'PRACTICAL/LAB' : 'THEORY'
+                }
+            }
+            summaryMap[subject].total += 1
+            if (attendedSessionIds.has(session.id)) {
+                summaryMap[subject].attended += 1
+            }
+        })
+
+        const subjects = Object.values(summaryMap).map(s => ({
+            ...s,
+            percentage: s.total > 0 ? (s.attended / s.total * 100).toFixed(1) : "0.0"
+        }))
+
+        // Totals calculation
+        const stats = {
+            total: { t: 0, a: 0 },
+            theory: { t: 0, a: 0 },
+            lab: { t: 0, a: 0 }
+        }
+
+        subjects.forEach(s => {
+            stats.total.t += s.total
+            stats.total.a += s.attended
+            if (s.type === 'THEORY') {
+                stats.theory.t += s.total
+                stats.theory.a += s.attended
+            } else {
+                stats.lab.t += s.total
+                stats.lab.a += s.attended
+            }
+        })
+
+        const getPct = (o) => o.t > 0 ? (o.a / o.t * 100).toFixed(2) : "0.00"
+
+        return res.json({
+            subjects,
+            overall_pct: getPct(stats.total),
+            theory_pct: getPct(stats.theory),
+            lab_pct: getPct(stats.lab)
+        })
+    } else {
+        return res.json({ subjects: [], overall_pct: "0.00", theory_pct: "0.00", lab_pct: "0.00" })
+    }
+})
 
 // Close / Terminate Session (Teacher)
 app.post('/api/sessions/:id/close', verifyToken, async (req, res) => {

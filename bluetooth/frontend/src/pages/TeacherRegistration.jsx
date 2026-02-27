@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { User, ShieldCheck, Mail, Phone, Lock, ArrowRight, Check, Key } from 'lucide-react';
+import { User, ShieldCheck, Mail, Phone, Lock, ArrowRight, Check, Key, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -16,8 +16,6 @@ const TeacherRegistration = () => {
         confirm_password: '',
         securityToken: ''
     });
-
-    const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -62,14 +60,12 @@ const TeacherRegistration = () => {
             const data = await res.json();
             if (res.ok) {
                 toast.success('Faculty Registration Successful!');
-                navigate('/login/teacher');
+                setTimeout(() => navigate('/login/teacher'), 1500);
             } else {
-                setError(data.error || 'Registration failed');
+                toast.error(data.error || 'Check details and token');
             }
         } catch (err) {
-            const msg = 'Server connection failed.';
-            setError(msg);
-            toast.error(msg);
+            toast.error('Connection Error. Could not reach server.');
         } finally {
             setLoading(false);
         }
@@ -86,11 +82,7 @@ const TeacherRegistration = () => {
                     <p style={{ color: '#64748b' }}>Create your administrative account</p>
                 </center>
 
-                {error && (
-                    <div style={{ color: '#ef4444', background: '#fef2f2', border: '1px solid #fecaca', padding: '1rem', borderRadius: '1rem', marginBottom: '2.5rem', textAlign: 'center', fontWeight: 600 }}>
-                        ⚠️ {error}
-                    </div>
-                )}
+
 
                 <form onSubmit={handleRegister}>
                     <div style={{ display: 'grid', gap: '1.5rem' }}>

@@ -168,10 +168,14 @@ const TeacherDashboard = () => {
     };
 
     useEffect(() => {
+        if (!activeSession) return;
+
+        // Only terminate if we're actually tracking a live countdown and it hits 0
         if (timeLeft <= 0) {
-            if (activeSession) terminateSession(activeSession.id);
+            terminateSession(activeSession.id);
             return;
         }
+
         const timer = setInterval(() => setTimeLeft(prev => Math.max(0, prev - 1)), 1000);
         return () => clearInterval(timer);
     }, [timeLeft, activeSession, terminateSession]);
