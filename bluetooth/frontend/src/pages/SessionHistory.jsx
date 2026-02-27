@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     Users, Clock, Calendar,
     Search, FileText,
-    CheckCircle2, ArrowLeft, Loader2, User
+    CheckCircle2, ArrowLeft, Loader2, User, Mail
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
@@ -157,6 +157,87 @@ const SessionHistory = () => {
         }
     };
 
+    const sendEmailReport = async (recipientRole, recipientEmail) => {
+        try {
+            if (!selectedSession || filteredRecords.length === 0) {
+                toast.error("No records to export!");
+                return;
+            }
+
+            toast.loading(`Automating PDF Attachment for ${recipientRole}...`, { id: 'email-toast' });
+
+            const doc = new jsPDF();
+            let logoAdded = false;
+
+            try {
+                doc.addImage(GITA_LOGO, 'PNG', 14, 10, 25, 25);
+                logoAdded = true;
+            } catch (e) {
+                console.warn('Could not inject base64 logo.', e);
+            }
+
+            const textStartX = logoAdded ? 45 : 14;
+
+            doc.setFontSize(18);
+            doc.text(`Attendance Report: ${selectedSession.subject}`, textStartX, 18);
+            doc.setFontSize(11);
+            doc.text(`Date: ${new Date(selectedSession.start_time).toLocaleDateString()} | Branch: ${selectedSession.branch}-${selectedSession.section}`, textStartX, 26);
+
+            const tableColumn = ["#", "Student Name", "Roll Number", "Status", "Time"];
+            const tableRows = filteredRecords.map((r, i) => [
+                i + 1,
+                r.students?.name || 'Unknown',
+                r.students?.roll_no || 'N/A',
+                "PRESENT",
+                new Date(r.timestamp || new Date()).toLocaleTimeString()
+            ]);
+
+            autoTable(doc, {
+                head: [tableColumn],
+                body: tableRows,
+                startY: logoAdded ? 40 : 35,
+                theme: 'striped'
+            });
+
+            // 1. Get raw PDF as base64 (this is needed for the attachment)
+            const pdfBase64 = doc.output('datauristring');
+            const filename = `Attendance_${selectedSession.subject}.pdf`;
+
+            // 2. Call the server to send the mail with ATTACHMENT
+            const res = await fetch(`${API}/api/reports/send-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: recipientEmail,
+                    subject: `Attendance Report: ${selectedSession.subject} (${selectedSession.branch}-${selectedSession.section})`,
+                    body: `
+                        <h2>Daily Attendance Report</h2>
+                        <p>Dear ${recipientRole},</p>
+                        <p>Please find attached the latest attendance report generated from GeoAttend.</p>
+                        <ul>
+                            <li><b>Subject:</b> ${selectedSession.subject}</li>
+                            <li><b>Branch:</b> ${selectedSession.branch} - Section ${selectedSession.section}</li>
+                            <li><b>Date:</b> ${new Date(selectedSession.start_time).toLocaleDateString()}</li>
+                            <li><b>Total Present:</b> ${filteredRecords.length} Students</li>
+                        </ul>
+                        <p>Best Regards,<br/>GeoAttend System</p>
+                    `,
+                    pdfBase64,
+                    filename
+                })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to send email');
+
+            toast.success(`Sent to ${recipientRole} with PDF Attached!`, { id: 'email-toast' });
+
+        } catch (err) {
+            console.error("Automated Email Error:", err);
+            toast.error("Failed to attach & send: " + err.message, { id: 'email-toast' });
+        }
+    };
+
     return (
         <div style={{ minHeight: '100vh', background: '#f8faff', fontFamily: "'Inter', sans-serif" }}>
             {/* Minimal Navbar */}
@@ -268,9 +349,17 @@ const SessionHistory = () => {
                                             style={{ width: '100%', padding: '0.85rem 1rem 0.85rem 2.5rem', borderRadius: '12px', border: '1px solid #e2e8f0', outline: 'none', fontSize: '0.9rem', background: '#f8fafc' }}
                                         />
                                     </div>
-                                    <button onClick={downloadPDF} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.85rem 1.5rem', borderRadius: '12px', background: '#4f46e5', color: 'white', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
-                                        <FileText size={18} /> Export PDF
-                                    </button>
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                        <button onClick={() => sendEmailReport('HOD', 'jyotiranjansahoo485@gmail.com')} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.85rem 1rem', borderRadius: '12px', background: '#e0e7ff', color: '#4338ca', border: 'none', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                            <Mail size={18} /> Send HOD
+                                        </button>
+                                        <button onClick={() => sendEmailReport('Principal', 'jyotiranjansahoo485@gmail.com')} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.85rem 1rem', borderRadius: '12px', background: '#e0e7ff', color: '#4338ca', border: 'none', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                            <Mail size={18} /> Send Principal
+                                        </button>
+                                        <button onClick={downloadPDF} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.85rem 1.5rem', borderRadius: '12px', background: '#4f46e5', color: 'white', border: 'none', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                            <FileText size={18} /> Export PDF
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
