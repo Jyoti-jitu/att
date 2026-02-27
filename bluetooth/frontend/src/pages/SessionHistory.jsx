@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
+import { GITA_LOGO } from '../utils/logoBase64';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -34,7 +35,9 @@ const SessionHistory = () => {
 
     const filteredSessions = sessions.filter(s => {
         if (!dateFilter) return true;
-        const sessionDate = new Date(s.start_time).toISOString().split('T')[0];
+        // Fix: Use local date extraction so timezone differences don't break the filter
+        const d = new Date(s.start_time);
+        const sessionDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         return sessionDate === dateFilter;
     });
 
@@ -101,30 +104,57 @@ const SessionHistory = () => {
         }
     };
 
-    const downloadPDF = () => {
-        if (!selectedSession || filteredRecords.length === 0) return;
-        const doc = new jsPDF();
-        doc.setFontSize(18);
-        doc.text(`Attendance Report: ${selectedSession.subject}`, 14, 15);
-        doc.setFontSize(11);
-        doc.text(`Date: ${new Date(selectedSession.start_time).toLocaleDateString()} | Branch: ${selectedSession.branch}-${selectedSession.section}`, 14, 25);
+    const downloadPDF = async () => {
+        try {
+            if (!selectedSession || filteredRecords.length === 0) {
+                toast.error("No records to export!");
+                return;
+            }
 
-        const tableColumn = ["#", "Student Name", "Roll Number", "Status", "Time"];
-        const tableRows = filteredRecords.map((r, i) => [
-            i + 1,
-            r.students?.name || 'Unknown',
-            r.students?.roll_no || 'N/A',
-            "PRESENT",
-            new Date(r.timestamp || new Date()).toLocaleTimeString()
-        ]);
+            toast.loading("Generating PDF...", { id: 'pdf-toast' });
 
-        doc.autoTable({
-            head: [tableColumn],
-            body: tableRows,
-            startY: 35,
-            theme: 'striped'
-        });
-        doc.save(`Attendance_${selectedSession.subject}.pdf`);
+            const doc = new jsPDF();
+            let logoAdded = false;
+
+            try {
+                // Add the embedded base64 image to the PDF (x, y, width, height)
+                doc.addImage(GITA_LOGO, 'PNG', 14, 10, 25, 25);
+                logoAdded = true;
+            } catch (e) {
+                console.warn('Could not inject base64 logo.', e);
+            }
+
+            // Adjust text format based on whether the logo is present or not
+            const textStartX = logoAdded ? 45 : 14;
+
+            doc.setFontSize(18);
+            doc.text(`Attendance Report: ${selectedSession.subject}`, textStartX, 18);
+            doc.setFontSize(11);
+            doc.text(`Date: ${new Date(selectedSession.start_time).toLocaleDateString()} | Branch: ${selectedSession.branch}-${selectedSession.section}`, textStartX, 26);
+
+            const tableColumn = ["#", "Student Name", "Roll Number", "Status", "Time"];
+            const tableRows = filteredRecords.map((r, i) => [
+                i + 1,
+                r.students?.name || 'Unknown',
+                r.students?.roll_no || 'N/A',
+                "PRESENT",
+                new Date(r.timestamp || new Date()).toLocaleTimeString()
+            ]);
+
+            autoTable(doc, {
+                head: [tableColumn],
+                body: tableRows,
+                startY: logoAdded ? 40 : 35,
+                theme: 'striped'
+            });
+
+            doc.save(`Attendance_${selectedSession.subject}.pdf`);
+            toast.success("PDF Downloaded successfully!", { id: 'pdf-toast' });
+
+        } catch (err) {
+            console.error("PDF Export Error:", err);
+            toast.error("Failed to generate PDF: " + err.message, { id: 'pdf-toast' });
+        }
     };
 
     return (

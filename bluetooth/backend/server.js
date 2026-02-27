@@ -159,7 +159,10 @@ let mockRecords = []
 
 // --- Email Config (Resend) ---
 const { Resend } = require('resend')
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Safe initialization: Only initialize if a key is provided, or pass a dummy key
+const resendApiKey = process.env.RESEND_API_KEY || 're_dummy_key_to_prevent_crash'
+const resend = new Resend(resendApiKey)
+
 const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev'
 // Note: If you have a verified domain, set SENDER_EMAIL in .env to an email at that domain.
 const otpStore = new Map() // email -> { otp, expiry }
