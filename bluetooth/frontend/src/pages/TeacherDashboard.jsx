@@ -96,7 +96,21 @@ const TeacherDashboard = () => {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
             });
             const data = await res.json();
-            if (Array.isArray(data)) setSessionHistory(data);
+            if (Array.isArray(data)) {
+                setSessionHistory(data);
+
+                // Automatically restore active session if teacher refreshes the page
+                const now = new Date();
+                const active = data.find(s => s.status === 'active' && new Date(s.expiry_time) > now);
+                if (active) {
+                    setActiveSession(active);
+                    const remainingSeconds = Math.floor((new Date(active.expiry_time).getTime() - now.getTime()) / 1000);
+                    setTimeLeft(remainingSeconds);
+                    // Match the local duration so the progress bar renders correctly
+                    const totalMins = Math.round((new Date(active.expiry_time).getTime() - new Date(active.start_time).getTime()) / 60000);
+                    if (totalMins > 0) setDuration(totalMins.toString());
+                }
+            }
         } catch (e) { console.error(e); }
     }, []);
 
@@ -197,10 +211,14 @@ const TeacherDashboard = () => {
     };
 
     useEffect(() => {
+        if (!activeSession) return;
+
+        // Only terminate if we're actually tracking a live countdown and it hits 0
         if (timeLeft <= 0) {
-            if (activeSession) terminateSession(activeSession.id);
+            terminateSession(activeSession.id);
             return;
         }
+
         const timer = setInterval(() => setTimeLeft(prev => Math.max(0, prev - 1)), 1000);
         return () => clearInterval(timer);
     }, [timeLeft, activeSession, terminateSession]);

@@ -5,7 +5,7 @@ import { getCurrentLocation, getDistance } from '../lib/geo';
 import {
     User, Smartphone, Wifi, MapPin, ShieldCheck, LogOut, Zap,
     Target, CheckCircle2, AlertCircle, Loader2, Clock, BookOpen,
-    Navigation, Radio, XCircle, Lock, GraduationCap, Users
+    Navigation, Radio, XCircle, Lock, GraduationCap, Users, Crosshair
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -141,10 +141,16 @@ const StudentDashboard = () => {
                     setLocationAccuracy(acc);
                 },
                 (err) => {
-                    console.error("Continuous GPS Watch Error:", err);
-                    if (err.code === 1) {
-                        toast.error('Location Access Denied. Please enable location services.', { id: 'gps-perm' });
-                        setGpsStatus('error');
+                    // Ignore timeouts (code 3) as the watch will continue trying
+                    if (err.code !== 3) {
+                        console.error("Continuous GPS Watch Error:", err);
+                        if (err.code === 1) {
+                            toast.error('Location Access Denied. Please enable location services.', { id: 'gps-perm' });
+                            setGpsStatus('error');
+                        } else {
+                            // Don't flag as permanent error for transient connection issues
+                            console.warn("Transient GPS issue:", err.message);
+                        }
                     }
                 },
                 {
@@ -377,7 +383,7 @@ const StudentDashboard = () => {
                                                 </div>
                                             </div>
                                         )}
-                                        <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)', borderRadius: '24px', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'white', gap: '1rem' }}>
+                                        <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)', borderRadius: '24px', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'white', gap: '1rem', marginBottom: '2rem' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
                                                 {/* Left Icon */}
                                                 <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -408,7 +414,13 @@ const StudentDashboard = () => {
                                                 <div style={{ fontSize: '1.8rem', fontWeight: 900, color: timerColor, fontFamily: 'monospace' }}>{formatTime(sessionTimeLeft)}</div>
                                             </div>
                                         </div>
-                                        <div style={{ background: 'white', borderRadius: '24px', padding: '2.5rem', boxShadow: '0 6px 30px rgba(0,0,0,0.05)' }}>
+
+                                        <div style={{ background: 'white', borderRadius: '24px', padding: isMobile ? '1.5rem' : '2.5rem', boxShadow: '0 6px 30px rgba(0,0,0,0.05)' }}>
+                                            <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+                                                <h2 style={{ fontSize: '1.75rem', fontWeight: 900, color: '#1e293b', marginBottom: '0.25rem' }}>Active Session Found</h2>
+                                                <p style={{ color: '#64748b', fontSize: '0.95rem' }}>{activeSession.subject} with Prof. Teacher</p>
+                                            </div>
+
                                             {success ? (
                                                 <div style={{ textAlign: 'center', padding: '2rem' }}>
                                                     <CheckCircle2 size={60} color="#10b981" style={{ margin: '0 auto 1rem' }} />
@@ -416,19 +428,45 @@ const StudentDashboard = () => {
                                                 </div>
                                             ) : (
                                                 <>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                                                        <div style={{ background: '#f0fdf4', border: '1px solid #dcfce7', borderRadius: '16px', padding: '1.25rem', textAlign: 'center' }}>
+                                                            <Clock size={20} color="#0ea5e9" style={{ margin: '0 auto 0.5rem' }} />
+                                                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#0ea5e9', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Time Left</div>
+                                                            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#0ea5e9' }}>{formatTime(sessionTimeLeft)}</div>
+                                                        </div>
+                                                        <div style={{ background: '#f5f3ff', border: '1px solid #ede9fe', borderRadius: '16px', padding: '1.25rem', textAlign: 'center' }}>
+                                                            <Crosshair size={20} color="#6366f1" style={{ margin: '0 auto 0.5rem' }} />
+                                                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#6366f1', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Target GPS</div>
+                                                            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#6366f1' }}>50 meters</div>
+                                                        </div>
+                                                        <div style={{ background: '#faf5ff', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '1.25rem', textAlign: 'center' }}>
+                                                            <Users size={20} color="#a855f7" style={{ margin: '0 auto 0.5rem' }} />
+                                                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#a855f7', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>ID Verification</div>
+                                                            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#a855f7' }}>Active Code</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '16px', padding: '1.25rem', textAlign: 'center', marginBottom: '1.5rem' }}>
+                                                        <MapPin size={20} color="#ef4444" style={{ margin: '0 auto 0.5rem' }} />
+                                                        <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#ef4444', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Classroom Anchor Point (Verified)</div>
+                                                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#991b1b' }}>{activeSession.teacher_lat?.toFixed(6) || '20.226613'}°, {activeSession.teacher_lng?.toFixed(6) || '85.730935'}°</div>
+                                                    </div>
+
                                                     {gpsStatus === 'ok' ? (
                                                         <>
                                                             <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                                                                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#4f46e5', marginBottom: '1rem' }}>6-DIGIT CODE</div>
+                                                                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#4f46e5', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>VERIFICATION CODE</div>
                                                                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                                                                     {otp.map((digit, i) => (
-                                                                        <input key={i} ref={el => otpRefs.current[i] = el} type="text" maxLength="1" value={digit} onChange={e => handleOtpChange(i, e.target.value)} style={{ width: '45px', height: '55px', borderRadius: '12px', border: '2px solid #e2e8f0', textAlign: 'center', fontSize: '1.2rem', fontWeight: 800 }} />
+                                                                        <input key={i} ref={el => otpRefs.current[i] = el} type="text" maxLength="1" value={digit} onChange={e => handleOtpChange(i, e.target.value)} style={{ width: isMobile ? '40px' : '55px', height: isMobile ? '50px' : '65px', borderRadius: '12px', border: '1px solid #e2e8f0', textAlign: 'center', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', background: 'white' }} />
                                                                     ))}
                                                                 </div>
                                                             </div>
-                                                            <button onClick={handleMarkAttendance} disabled={marking} style={{ width: '100%', padding: '1.25rem', background: '#2563eb', color: 'white', borderRadius: '16px', fontWeight: 800, border: 'none', cursor: 'pointer' }}>
+                                                            <button onClick={handleMarkAttendance} disabled={marking} style={{ width: '100%', padding: '1rem', background: marking ? '#cbd5e1' : '#2563eb', color: 'white', borderRadius: '12px', fontWeight: 800, border: 'none', cursor: marking ? 'not-allowed' : 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem', transition: 'background 0.2s' }}>
+                                                                {marking && <Loader2 size={20} className="animate-spin" />}
                                                                 {marking ? 'Processing...' : 'Mark Present'}
                                                             </button>
+                                                            <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.75rem', color: '#94a3b8' }}>Your GPS location will be checked against the classroom zone</div>
                                                         </>
                                                     ) : (
                                                         <div style={{ textAlign: 'center', padding: '2rem' }}>
