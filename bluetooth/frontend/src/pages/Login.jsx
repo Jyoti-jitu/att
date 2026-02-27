@@ -29,31 +29,52 @@ const Login = () => {
     const themeColor = role === 'teacher' ? '#7c3aed' : '#2563eb';
     const bgColor = role === 'teacher' ? 'rgba(124, 58, 237, 0.05)' : 'rgba(37, 99, 235, 0.05)';
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
+    const handleSubmit = async (e, force = false) => {
+        if (e) e.preventDefault();
         setLoading(true);
 
         try {
             const res = await fetch(`${API}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password, role })
+                body: JSON.stringify({ email, password, role, forceLogin: force })
             });
+
             const data = await res.json();
+
+            if (res.status === 409) {
+                toast((t) => (
+                    <div style={{ color: '#fff' }}>
+                        <p style={{ fontWeight: 800, fontSize: '0.9rem', marginBottom: '4px' }}>Session Active</p>
+                        <p style={{ fontSize: '0.8rem', opacity: 0.8, marginBottom: '12px' }}>This account is logged in elsewhere. Join here?</p>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                                onClick={() => { toast.dismiss(t.id); handleSubmit(null, true); }}
+                                style={{ background: '#fff', color: themeColor, border: 'none', padding: '4px 12px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
+                            >
+                                Force Login
+                            </button>
+                            <button
+                                onClick={() => toast.dismiss(t.id)}
+                                style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '4px 12px', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                ), { duration: 6000, style: { background: themeColor, minWidth: '250px' } });
+                return;
+            }
+
             if (res.ok) {
-                toast.success('Login Successful');
+                toast.success('Access Granted. Redirecting...');
                 login(data.user, data.token);
                 navigate(role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard');
             } else {
-                const errMsg = data.error || 'Invalid credentials';
-                setError(errMsg);
-                toast.error(errMsg);
+                toast.error(data.error || 'Invalid credentials');
             }
         } catch (err) {
-            const errMsg = 'Server connection failed. Is the backend running?';
-            setError(errMsg);
-            toast.error(errMsg);
+            toast.error('Connection failure. Check if backend is alive.');
         } finally {
             setLoading(false);
         }
@@ -148,24 +169,6 @@ const Login = () => {
                         <h2 style={{ fontSize: isTiny ? '1.75rem' : '2.2rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.5rem' }}>Welcome Back</h2>
                         <p style={{ color: '#64748b' }}>Please enter your access details</p>
                     </div>
-
-                    {error && (
-                        <div style={{
-                            color: '#ef4444',
-                            background: '#fef2f2',
-                            padding: '1rem',
-                            borderRadius: '1rem',
-                            marginBottom: '2rem',
-                            fontSize: '0.9rem',
-                            fontWeight: 600,
-                            border: '1px solid #fee2e2',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.75rem'
-                        }}>
-                            <LogIn size={18} /> {error}
-                        </div>
-                    )}
 
                     <form onSubmit={handleSubmit}>
                         <div className="form-group">

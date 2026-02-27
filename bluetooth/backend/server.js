@@ -4,7 +4,7 @@ const dotenv = require('dotenv')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const { createClient } = require('@supabase/supabase-js')
-const twilio = require('twilio')
+
 
 dotenv.config()
 
@@ -21,7 +21,14 @@ app.get('/', (req, res) => {
         status: '✅ GeoAttend Backend is running',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
-        endpoints: ['/api/auth/login', '/api/sessions/active', '/api/attendance/mark']
+        endpoints: [
+            '/api/auth/login',
+            '/api/auth/register',
+            '/api/auth/send-otp',
+            '/api/auth/verify-otp',
+            '/api/sessions/active',
+            '/api/attendance/mark'
+        ]
     })
 })
 
@@ -37,21 +44,7 @@ if (supabaseUrl && supabaseKey) {
     console.log('⚠️ Supabase not configured - running in mock mode')
 }
 
-// --- Twilio Config ---
-const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
-const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
-let twilioClient = null;
 
-if (twilioAccountSid && twilioAuthToken && twilioAccountSid !== 'your_sid') {
-    try {
-        twilioClient = twilio(twilioAccountSid, twilioAuthToken);
-        console.log('✅ Twilio SMS Service initialized');
-    } catch (err) {
-        console.log('❌ Twilio initialization failed:', err.message);
-    }
-} else {
-    console.log('⚠️ Twilio SID/Token missing - SMS will run in MOCK mode');
-}
 
 // --- JWT Helper ---
 const JWT_SECRET = process.env.JWT_SECRET || 'geo-fence-secret-key'
@@ -162,76 +155,92 @@ let mockRecords = []
 
 // --- Routes ---
 
-const otpStore = {}; // Memory cache for OTPs (Ideally use Redis in Production)
 
-// Send OTP via Twilio
-app.post('/api/auth/send-otp', async (req, res) => {
-    const normalizePhone = (p) => p ? String(p).replace(/\s+/g, '') : '';
-    const phone = normalizePhone(req.body.phone);
-    if (!phone) return res.status(400).json({ error: 'Phone number is required' });
 
-    // Generate 6 digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otpStore[phone] = otp;
-
-    console.log(`Sending OTP ${otp} to ${phone}`);
-
-    try {
-        if (!twilioClient) {
-            console.log(`[MOCK SMS] To: ${phone} | Code: ${otp}`);
-            return res.json({ message: `Mock OTP ${otp} sent to ${phone}`, success: true });
-        }
-
-        // Robust Phone Normalization for Twilio
-        let formattedPhone = phone;
-        if (!formattedPhone.startsWith('+')) {
-            // If it's a 10 digit number, assume +91
-            if (formattedPhone.length === 10) {
-                formattedPhone = '+91' + formattedPhone;
-            } else {
-                // Otherwise user should provide country code
-                return res.status(400).json({ error: 'Please provide phone number with country code (e.g. +91...)' });
-            }
-        }
-
-        await twilioClient.messages.create({
-            body: `[GeoAttend] Your verification code is: ${otp}. Do not share this with anyone.`,
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: formattedPhone
-        });
-
-        console.log(`✅ Real SMS sent to ${formattedPhone}`);
-        res.json({ message: 'OTP sent successfully', success: true });
-    } catch (error) {
-        console.error('Twilio Error:', error);
-        res.status(500).json({ error: 'Failed to send OTP via SMS.' });
-    }
-});
-
-app.post('/api/auth/verify-otp', (req, res) => {
-    const normalizePhone = (p) => p ? String(p).replace(/\s+/g, '') : '';
-    const phone = normalizePhone(req.body.phone);
-    const { otp } = req.body;
-
-    // Normalize phone incoming from frontend just in case 
-    // Usually it sends without +91, but we stored it without +91 as well, so let's verify exact Match
-    if (otpStore[phone] && otpStore[phone] === otp) {
-        delete otpStore[phone]; // Clear after verified
-        res.json({ success: true, message: 'OTP Verified' });
-    } else {
-        res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
-    }
-});
+// --- Email Config (Resend) ---
+const { Resend } = require('resend')
+const resend = new Resend(process.env.RESEND_API_KEY)
+const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev'
+// Note: If you have a verified domain, set SENDER_EMAIL in .env to an email at that domain.
+const otpStore = new Map() // email -> { otp, expiry }
 
 // Registration (Student)
+app.post('/api/auth/send-otp', async (req, res) => {
+    const { email } = req.body
+    if (!email) return res.status(400).json({ error: 'Email is required' })
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const expiry = Date.now() + 10 * 60 * 1000 // 10 minutes
+    otpStore.set(email, { otp, expiry })
+
+    const isResendConfigured = process.env.RESEND_API_KEY &&
+        process.env.RESEND_API_KEY !== 're_YOUR_RESEND_KEY_HERE';
+
+    console.log(`[AUTH] Sending OTP for ${email}: ${otp}`)
+
+    if (isResendConfigured) {
+        // Send email in background so the user gets an immediate response
+        res.json({ message: 'Verification code sent!' });
+
+        (async () => {
+            try {
+                console.log(`[AUTH] Background: Sending OTP to ${email} from ${SENDER_EMAIL}...`);
+                const { data, error } = await resend.emails.send({
+                    from: `GeoAttend <${SENDER_EMAIL}>`,
+                    to: email,
+                    subject: 'Verify your Student Account',
+                    html: `
+                        <div style="font-family: sans-serif; max-width: 400px; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                            <h2 style="color: #2563eb;">Verification Code</h2>
+                            <p>Use code below to complete registration:</p>
+                            <div style="background: #f4f7ff; padding: 20px; text-align: center; border-radius: 8px;">
+                                <span style="font-size: 32px; font-weight: 800; letter-spacing: 5px; color: #1e3a8a;">${otp}</span>
+                            </div>
+                            <p style="font-size: 12px; color: #666; margin-top: 20px;">Expired in 10 minutes.</p>
+                        </div>
+                    `
+                });
+
+                if (error) {
+                    console.error('[AUTH] Background Resend Error:', error);
+                } else {
+                    console.log(`[AUTH] Background Email Success ID: ${data.id}`);
+                }
+            } catch (err) {
+                console.error('[AUTH] Background Unexpected Error:', err);
+            }
+        })();
+    } else {
+        console.log(`[DEV MODE] OTP for ${email}: ${otp}`);
+        res.json({ message: 'OTP generated (Mock Mode - check server console)', otp });
+    }
+})
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+    const { email, otp } = req.body
+    const record = otpStore.get(email)
+
+    if (!record || record.otp !== otp || Date.now() > record.expiry) {
+        return res.status(400).json({ error: 'Invalid or expired OTP' })
+    }
+
+    res.json({ message: 'OTP verified successfully', success: true })
+})
+
 app.post('/api/auth/register', async (req, res) => {
     const {
         name, roll_no, mobile, branch, semester, section,
-        email, parent_mobile, password
+        email, parent_mobile, password, otp
     } = req.body
 
-    if (!name || !roll_no || !email || !password || !mobile || !branch || !semester || !section) {
-        return res.status(400).json({ error: 'All primary fields are required' })
+    if (!name || !roll_no || !email || !password || !mobile || !branch || !semester || !section || !otp) {
+        return res.status(400).json({ error: 'All fields including OTP are required' })
+    }
+
+    // Verify OTP one last time during registration
+    const record = otpStore.get(email)
+    if (!record || record.otp !== otp || Date.now() > record.expiry) {
+        return res.status(400).json({ error: 'Invalid or expired OTP. Please verify again.' })
     }
 
     const password_hash = await bcrypt.hash(password, 10)
@@ -247,10 +256,12 @@ app.post('/api/auth/register', async (req, res) => {
             if (error.code === '23505') return res.status(400).json({ error: 'Email or Roll Number already exists' })
             return res.status(400).json({ error: error.message })
         }
+        otpStore.delete(email)
         return res.json({ message: 'Registration successful', student: data[0] })
     } else {
         const student = { id: Date.now().toString(), ...studentData }
         mockStudents.push(student)
+        otpStore.delete(email)
         return res.json({ message: 'Registration successful (Mock Mode)', student })
     }
 })
@@ -319,7 +330,7 @@ app.get('/api/auth/me', verifyToken, async (req, res) => {
 
 // Unified Login
 app.post('/api/auth/login', async (req, res) => {
-    const { email, password, role } = req.body
+    const { email, password, role, forceLogin } = req.body
     let user;
 
     if (supabase) {
@@ -336,6 +347,14 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) return res.status(401).json({ error: 'Invalid password' })
 
+    // Check for concurrent session (Student only)
+    if (role === 'student' && user.current_session_token && !forceLogin) {
+        return res.status(409).json({
+            error: 'Account already logged in on another device',
+            details: 'This account has an active session. Do you want to terminate other sessions and log in here?'
+        })
+    }
+
     // 0. Check if student is currently blocked
     if (user.blocked_until) {
         const blockEnds = new Date(user.blocked_until).getTime();
@@ -348,14 +367,9 @@ app.post('/api/auth/login', async (req, res) => {
         }
     }
 
-    // 1. (Security note: Students can always login to check their dashboard now)
-
-    // Unified Login logic without device binding
-
-
     const session_token = require('crypto').randomUUID()
 
-    // Single Session Control
+    // Update session token
     if (role === 'student') {
         user.current_session_token = session_token;
         if (supabase) {
@@ -510,7 +524,7 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
     if (supabase) {
         const { data, error } = await supabase
             .from('students')
-            .select('id, current_session_token, email, blocked_until')
+            .select('id, current_session_token, email, name, roll_no, branch, section, semester, blocked_until')
             .eq('id', student_id)
             .single()
 
@@ -613,6 +627,7 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
             if (error.code === '23505') return res.status(400).json({ error: 'Attendance already marked' })
             return res.status(400).json({ error: error.message })
         }
+
         return res.json({ message: 'Attendance marked present!', record: data[0] })
     } else {
         if (mockRecords.some(r => r.session_id === session_id && r.student_id === student_id)) {

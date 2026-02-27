@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { User, Phone, Mail, BookOpen, Layers, ShieldCheck, ArrowRight, Check, Smartphone, GraduationCap } from 'lucide-react';
+import { User, Mail, ArrowRight, ShieldCheck, Phone, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
+import OTPInput from '../components/OTPInput';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const Registration = () => {
     const navigate = useNavigate();
-    const [step, setStep] = useState(1); // 1: Info, 2: Student OTP, 3: Parent OTP
     const [formData, setFormData] = useState({
         name: '',
         roll_no: '',
@@ -21,9 +21,8 @@ const Registration = () => {
         confirm_password: ''
     });
 
-    const [studentOtp, setStudentOtp] = useState(['', '', '', '', '', '']);
-    const [parentOtp, setParentOtp] = useState(['', '', '', '', '', '']);
-    const [error, setError] = useState('');
+    const [step, setStep] = useState(1);
+    const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -44,188 +43,99 @@ const Registration = () => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
-    const handleOtpChange = (type, index, value) => {
-        if (!/^\d*$/.test(value)) return;
-        const newOtp = type === 'student' ? [...studentOtp] : [...parentOtp];
-        newOtp[index] = value.slice(-1);
-
-        if (type === 'student') setStudentOtp(newOtp);
-        else setParentOtp(newOtp);
-
-        // Auto-focus next input
-        if (value && index < 5) {
-            const nextInput = document.getElementById(`${type}-otp-${index + 1}`);
-            if (nextInput) nextInput.focus();
-        }
-    };
-
     const handleNextStep = async (e) => {
         e.preventDefault();
         if (formData.password !== formData.confirm_password) {
-            const msg = 'Passwords do not match';
-            setError(msg);
-            toast.error(msg);
+            toast.error('Passwords do not match');
             return;
         }
         if (formData.password.length < 6) {
-            const msg = 'Password must be at least 6 characters';
-            setError(msg);
-            toast.error(msg);
+            toast.error('Password must be at least 6 characters');
             return;
         }
         if (formData.mobile.trim() === formData.parent_mobile.trim()) {
-            const msg = 'Student and Guardian mobile numbers cannot be identical.';
-            setError(msg);
-            toast.error(msg);
+            toast.error('Student and Guardian mobile numbers cannot be identical.');
             return;
         }
-        setError('');
+
         setLoading(true);
 
         try {
             const res = await fetch(`${API}/api/auth/send-otp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: formData.mobile })
+                body: JSON.stringify({ email: formData.email })
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success('OTP sent to your mobile');
-                setStep(2); // Go to Student OTP
+                toast.success(`Verification code sent to ${formData.email}`);
+                setStep(2);
             } else {
-                const errMsg = data.error || 'Failed to send OTP to Student Mobile';
-                setError(errMsg);
-                toast.error(errMsg);
+                toast.error(data.error || 'Failed to send OTP');
             }
         } catch (err) {
-            const errMsg = 'Is the server running? ' + err.message;
-            setError(errMsg);
-            toast.error(errMsg);
+            toast.error('Connection Error. Could not reach server.');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleVerifyStudentOtp = async () => {
-        const otp = studentOtp.join('');
-        if (otp.length < 6) {
-            setError('Please enter all 6 digits.');
-            return;
-        }
-        setError('');
+    const handleRegister = async (e) => {
+        if (e) e.preventDefault();
         setLoading(true);
 
         try {
-            const res = await fetch(`${API}/api/auth/verify-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: formData.mobile, otp })
-            });
-            const data = await res.json();
-            if (res.ok) {
-                toast.success('Mobile Verified. Sending code to parent.');
-                // Verified. Now send OTP to parent.
-                await fetch(`${API}/api/auth/send-otp`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone: formData.parent_mobile })
-                });
-                setStep(3); // Go to Parent OTP
-            } else {
-                const errMsg = data.error || 'Invalid OTP';
-                setError(errMsg);
-                toast.error(errMsg);
-            }
-        } catch (err) {
-            const errMsg = 'Server connection failed.';
-            setError(errMsg);
-            toast.error(errMsg);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleVerifyParentOtpAndRegister = async () => {
-        const otp = parentOtp.join('');
-        if (otp.length < 6) return;
-
-        setError('');
-        setLoading(true);
-
-        try {
-            // 1. Verify Parent OTP
-            const otpRes = await fetch(`${API}/api/auth/verify-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: formData.parent_mobile, otp })
-            });
-            const otpData = await otpRes.json();
-
-            if (!otpRes.ok) {
-                setError(otpData.error || 'Invalid Parent OTP');
-                setLoading(false);
-                return;
-            }
-
-            // 2. Register Student
             const res = await fetch(`${API}/api/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...formData })
+                body: JSON.stringify({ ...formData, otp })
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success('Registration successful! Welcome to GeoAttend.');
-                navigate('/login/student');
+                toast.success('Registration successful! Welcome Aboard.');
+                setTimeout(() => navigate('/login/student'), 1500);
             } else {
-                setError(data.error || 'Registration failed');
+                toast.error(data.error || 'Invalid code or data');
             }
         } catch (err) {
-            setError('Server connection failed. Is the backend running?');
+            toast.error('Connection lost. Please try again.');
         } finally {
             setLoading(false);
         }
     };
+
+    const calculatePasswordStrength = (pwd) => {
+        if (!pwd) return 0;
+        let score = 0;
+        if (pwd.length >= 8) score++;
+        if (/[A-Z]/.test(pwd)) score++;
+        if (/[0-9]/.test(pwd)) score++;
+        if (/[!@#$%^&*]/.test(pwd)) score++;
+        return score;
+    };
+
+    const strength = calculatePasswordStrength(formData.password);
+    const strengthColor = strength <= 1 ? '#ef4444' : strength <= 3 ? '#f59e0b' : '#22c55e';
+    const strengthText = strength <= 1 ? 'Weak' : strength <= 3 ? 'Medium' : 'Strong';
 
     return (
         <div className="min-h-screen" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: isTiny ? '1rem' : '2rem' }}>
             <div className="bg-mesh" />
 
-            <div className="glass-card animate-fade-in" style={{ maxWidth: '1000px', width: '100%', padding: isTiny ? '2rem 1.25rem' : isMobile ? '2.5rem' : '3.5rem' }}>
+            <div className="glass-card animate-fade-in" style={{ maxWidth: step === 1 ? '1000px' : '500px', width: '100%', padding: isTiny ? '2rem 1.25rem' : isMobile ? '2.5rem' : '3.5rem' }}>
                 <center style={{ marginBottom: isTiny ? '2.5rem' : '3.5rem' }}>
-                    <div className="badge" style={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>Secure Enrollment</div>
-                    <h2 style={{ fontSize: isTiny ? '1.8rem' : isMobile ? '2.2rem' : '2.8rem', fontWeight: 800, color: '#1e3a8a', marginBottom: '0.5rem' }}>Student Registration</h2>
-
-                    {/* Progress Bar */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1.5rem', width: '100%', maxWidth: '600px' }}>
-                        {[
-                            { id: 1, label: isTiny ? 'INFO' : 'INFO' },
-                            { id: 2, label: isTiny ? 'S-OTP' : 'STUDENT OTP' },
-                            { id: 3, label: isTiny ? 'P-OTP' : 'PARENT OTP' }
-                        ].map((s) => (
-                            <div key={s.id} style={{ flex: 1, textAlign: 'center' }}>
-                                <div style={{
-                                    height: '4px',
-                                    background: step >= s.id ? '#2563eb' : '#e2e8f0',
-                                    borderRadius: '2px',
-                                    marginBottom: '0.5rem',
-                                    transition: 'all 0.3s'
-                                }} />
-                                <span style={{
-                                    fontSize: '0.65rem',
-                                    fontWeight: 800,
-                                    color: step >= s.id ? '#2563eb' : '#94a3b8'
-                                }}>{s.label}</span>
-                            </div>
-                        ))}
+                    <div className="badge" style={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                        {step === 1 ? 'Step 1: Details' : 'Step 2: Verification'}
                     </div>
+                    <h2 style={{ fontSize: isTiny ? '1.8rem' : isMobile ? '2.2rem' : '2.8rem', fontWeight: 800, color: '#1e3a8a', marginBottom: '0.5rem' }}>
+                        {step === 1 ? 'Student Registration' : 'Verify Email'}
+                    </h2>
+                    <p style={{ color: '#64748b', fontSize: '1.1rem' }}>
+                        {step === 1 ? 'Join the GeoAttend community' : `Enter code sent to ${formData.email}`}
+                    </p>
                 </center>
 
-                {error && (
-                    <div style={{ color: '#ef4444', background: '#fef2f2', border: '1px solid #fecaca', padding: '1rem', borderRadius: '1rem', marginBottom: '2.5rem', textAlign: 'center', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontSize: isTiny ? '0.85rem' : '1rem' }}>
-                        ⚠️ {error}
-                    </div>
-                )}
+
 
                 {step === 1 ? (
                     <form onSubmit={handleNextStep}>
@@ -271,120 +181,63 @@ const Registration = () => {
 
                             {/* Contact & Security */}
                             <div>
-                                <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', color: '#4f46e5', fontSize: '1.1rem', fontWeight: 700 }}>
-                                    <div style={{ background: '#eef2ff', padding: '0.5rem', borderRadius: '0.5rem' }}><Mail size={20} /></div> Security & Contacts
+                                <h4 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', color: '#4f46e5', fontSize: '1.2rem', fontWeight: 800 }}>
+                                    <div style={{ background: '#eef2ff', padding: '0.5rem', borderRadius: '0.8rem' }}><ShieldCheck size={22} /></div> Security & Contact
                                 </h4>
                                 <div className="form-group">
-                                    <label>Student Email</label>
+                                    <label>Student Email <span style={{ color: '#ef4444' }}>*</span></label>
                                     <input className="input" type="email" name="email" placeholder="student@college.edu" value={formData.email} onChange={handleChange} required />
                                 </div>
                                 <div className="form-group">
-                                    <label>Guardian Mobile</label>
-                                    <input className="input" name="parent_mobile" placeholder="+91 00000 00000" value={formData.parent_mobile} onChange={handleChange} required />
+                                    <label>Guardian Mobile <span style={{ color: '#ef4444' }}>*</span></label>
+                                    <input className="input" name="parent_mobile" placeholder="Guardian Phone" value={formData.parent_mobile} onChange={handleChange} required />
                                 </div>
                                 <div className="form-group">
-                                    <label>Account Password</label>
-                                    <input className="input" type="password" name="password" placeholder="Password" value={formData.password} onChange={handleChange} required />
+                                    <label>Account Password <span style={{ color: '#ef4444' }}>*</span></label>
+                                    <input className="input" type="password" name="password" placeholder="Create password" value={formData.password} onChange={handleChange} required />
+                                    {formData.password && (
+                                        <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                            <div style={{ flex: 1, height: '4px', background: '#e2e8f0', borderRadius: '2px', overflow: 'hidden' }}>
+                                                <div style={{ width: `${(strength / 4) * 100}%`, height: '100%', background: strengthColor, transition: 'all 0.3s' }} />
+                                            </div>
+                                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: strengthColor }}>{strengthText}</span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="form-group">
-                                    <label>Verify Password</label>
-                                    <input className="input" type="password" name="confirm_password" placeholder="Password" value={formData.confirm_password} onChange={handleChange} required />
+                                    <label>Confirm Password <span style={{ color: '#ef4444' }}>*</span></label>
+                                    <input className="input" type="password" name="confirm_password" placeholder="Retype password" value={formData.confirm_password} onChange={handleChange} required />
                                 </div>
                             </div>
                         </div>
 
                         <div style={{ marginTop: '3rem', textAlign: 'center' }}>
-                            <button className="btn btn-primary" style={{ width: '100%', maxWidth: '500px', height: '4rem', fontSize: '1.1rem' }} disabled={loading}>
-                                {loading ? 'Processing...' : 'Send Verification Codes'} <ArrowRight size={22} />
+                            <button className="btn btn-primary" type="submit" style={{ width: '100%', maxWidth: '500px', height: '4rem', fontSize: '1.1rem' }} disabled={loading}>
+                                {loading ? 'Sending Code...' : 'Next: Verify Email'} <ArrowRight size={22} />
                             </button>
                         </div>
                     </form>
-                ) : step === 2 ? (
-                    <div style={{ textAlign: 'center', maxWidth: '500px', margin: '0 auto' }}>
-                        <div className="icon-wrapper bg-blue" style={{ margin: '0 auto 2rem', width: '4.5rem', height: '4.5rem', borderRadius: '1.25rem' }}>
-                            <Smartphone size={32} />
-                        </div>
-                        <h3 style={{ fontSize: isTiny ? '1.5rem' : '1.8rem', fontWeight: 800, marginBottom: '0.75rem' }}>Student Verification</h3>
-                        <p style={{ color: '#64748b', marginBottom: '2.5rem', fontSize: isTiny ? '0.9rem' : '1.1rem' }}>
-                            Verification code sent to your mobile <br /> <strong style={{ color: '#1e293b' }}>{formData.mobile}</strong>
-                        </p>
-
-                        <div style={{ display: 'flex', gap: isTiny ? '0.5rem' : '1rem', justifyContent: 'center', marginBottom: '3rem' }}>
-                            {studentOtp.map((digit, idx) => (
-                                <input
-                                    key={idx}
-                                    id={`student-otp-${idx}`}
-                                    className="input"
-                                    autoComplete="off"
-                                    style={{
-                                        width: isTiny ? '2.5rem' : '3.5rem',
-                                        height: isTiny ? '3.5rem' : '4.5rem',
-                                        textAlign: 'center',
-                                        fontSize: isTiny ? '1.4rem' : '1.8rem',
-                                        fontWeight: 800,
-                                        padding: 0,
-                                        background: '#f8fafc',
-                                        border: '2px solid #e2e8f0',
-                                        borderRadius: '0.75rem'
-                                    }}
-                                    value={digit}
-                                    onChange={(e) => handleOtpChange('student', idx, e.target.value)}
-                                    maxLength={1}
-                                />
-                            ))}
-                        </div>
-
-                        <button className="btn btn-primary" style={{ width: '100%', height: '3.5rem', fontSize: '1.1rem' }} onClick={handleVerifyStudentOtp} disabled={loading}>
-                            {loading ? 'Verifying...' : 'Verify Student ID'} <Check size={22} />
-                        </button>
-
-                        <button style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', marginTop: '1.5rem', fontWeight: 600 }} onClick={() => setStep(1)}>
-                            ← Edit Details
-                        </button>
-                    </div>
                 ) : (
-                    <div style={{ textAlign: 'center', maxWidth: '500px', margin: '0 auto' }}>
-                        <div className="icon-wrapper bg-indigo" style={{ margin: '0 auto 2rem', width: '4.5rem', height: '4.5rem', borderRadius: '1.25rem' }}>
-                            <ShieldCheck size={32} />
+                    <form onSubmit={handleRegister}>
+                        <div className="form-group" style={{ textAlign: 'center', marginBottom: '2rem' }}>
+                            <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', marginBottom: '1.5rem', display: 'block' }}>Enter 6-digit Verification Code</label>
+                            <OTPInput length={6} value={otp} onChange={setOtp} onComplete={handleRegister} />
+                            <p style={{ marginTop: '1rem', color: '#94a3b8', fontSize: '0.875rem' }}>The code expires in 5 minutes</p>
                         </div>
-                        <h3 style={{ fontSize: isTiny ? '1.5rem' : '1.8rem', fontWeight: 800, marginBottom: '0.75rem' }}>Guardian Approval</h3>
-                        <p style={{ color: '#64748b', marginBottom: '2.5rem', fontSize: isTiny ? '0.9rem' : '1.1rem' }}>
-                            Second code sent to Parent/Guardian mobile <br /> <strong style={{ color: '#1e293b' }}>{formData.parent_mobile}</strong>
+
+                        <div style={{ marginTop: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            <button className="btn btn-primary" type="submit" style={{ width: '100%', height: '4rem', fontSize: '1.1rem' }} disabled={loading}>
+                                {loading ? 'Verifying...' : 'Finish Registration'}
+                            </button>
+                            <button className="btn btn-outline" type="button" onClick={() => setStep(1)} style={{ width: '100%' }}>
+                                Back to Details
+                            </button>
+                        </div>
+
+                        <p style={{ marginTop: '2rem', textAlign: 'center', color: '#64748b' }}>
+                            Didn't receive the code? <button type="button" onClick={handleNextStep} style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 700, cursor: 'pointer' }}>Resend</button>
                         </p>
-
-                        <div style={{ display: 'flex', gap: isTiny ? '0.5rem' : '1rem', justifyContent: 'center', marginBottom: '3rem' }}>
-                            {parentOtp.map((digit, idx) => (
-                                <input
-                                    key={idx}
-                                    id={`parent-otp-${idx}`}
-                                    className="input"
-                                    autoComplete="off"
-                                    style={{
-                                        width: isTiny ? '2.5rem' : '3.5rem',
-                                        height: isTiny ? '3.5rem' : '4.5rem',
-                                        textAlign: 'center',
-                                        fontSize: isTiny ? '1.4rem' : '1.8rem',
-                                        fontWeight: 800,
-                                        padding: 0,
-                                        background: '#f8fafc',
-                                        border: '2px solid #e2e8f0',
-                                        borderRadius: '0.75rem'
-                                    }}
-                                    value={digit}
-                                    onChange={(e) => handleOtpChange('parent', idx, e.target.value)}
-                                    maxLength={1}
-                                />
-                            ))}
-                        </div>
-
-                        <button className="btn btn-primary" style={{ width: '100%', height: '3.5rem', fontSize: '1.1rem' }} onClick={handleVerifyParentOtpAndRegister} disabled={loading}>
-                            {loading ? 'Finalizing Profile...' : 'Complete Enrollment'} <Check size={22} />
-                        </button>
-
-                        <button style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', marginTop: '1.5rem', fontWeight: 600 }} onClick={() => setStep(2)}>
-                            ← Previous Step
-                        </button>
-                    </div>
+                    </form>
                 )}
 
                 <div style={{ marginTop: '3.5rem', textAlign: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '2.5rem', fontSize: '1rem' }}>

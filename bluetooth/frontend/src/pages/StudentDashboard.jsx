@@ -324,7 +324,7 @@ const StudentDashboard = () => {
                                 {[
                                     { icon: <GraduationCap size={16} />, label: 'Branch & Sem', val: `${user?.branch} • Sem ${user?.semester}` },
                                     { icon: <Smartphone size={16} />, label: 'Device Status', val: 'Active' },
-                                    { icon: <ShieldCheck size={16} />, label: 'Verified Contact', val: user?.mobile },
+                                    { icon: <ShieldCheck size={16} />, label: 'Contact Number', val: user?.mobile },
                                 ].map((item, i) => (
                                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', background: '#f8fafc', borderRadius: '14px', border: '1px solid #f1f5f9' }}>
                                         <div style={{ color: '#6366f1' }}>{item.icon}</div>
