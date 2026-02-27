@@ -384,9 +384,12 @@ const StudentDashboard = () => {
                                     </div>
                                 ))}
                             </div>
-                            <div style={{ marginTop: '1.25rem' }}>
-                                <button onClick={() => { setActiveTab(activeTab === 'attendance' ? 'report' : 'attendance'); if (activeTab === 'attendance' && !summaryData) fetchSummary(); }} style={{ width: '100%', padding: '0.875rem', background: activeTab === 'report' ? '#4f46e5' : '#f8fafc', color: activeTab === 'report' ? 'white' : '#4f46e5', border: activeTab === 'report' ? 'none' : '1.5px solid #4f46e5', borderRadius: '14px', fontWeight: 800, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', transition: 'all 0.2s' }}>
-                                    {activeTab === 'attendance' ? <><BookOpen size={16} /> View Report</> : <><Zap size={16} /> Mark Attendance</>}
+                            <div style={{ marginTop: '1.25rem', padding: '0.35rem', background: '#f1f5f9', borderRadius: '16px', display: 'flex', gap: '0.35rem' }}>
+                                <button onClick={() => setActiveTab('attendance')} style={{ flex: 1, padding: '0.8rem', border: 'none', background: activeTab === 'attendance' ? '#4f46e5' : 'transparent', color: activeTab === 'attendance' ? 'white' : '#64748b', borderRadius: '12px', fontWeight: 800, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', transition: 'all 0.2s', boxShadow: activeTab === 'attendance' ? '0 4px 12px rgba(79, 70, 229, 0.25)' : 'none' }}>
+                                    <Zap size={16} /> Live
+                                </button>
+                                <button onClick={() => { setActiveTab('report'); if (!summaryData) fetchSummary(); }} style={{ flex: 1, padding: '0.8rem', border: 'none', background: activeTab === 'report' ? '#4f46e5' : 'transparent', color: activeTab === 'report' ? 'white' : '#64748b', borderRadius: '12px', fontWeight: 800, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', transition: 'all 0.2s', boxShadow: activeTab === 'report' ? '0 4px 12px rgba(79, 70, 229, 0.25)' : 'none' }}>
+                                    <BookOpen size={16} /> Report
                                 </button>
                             </div>
                         </div>
