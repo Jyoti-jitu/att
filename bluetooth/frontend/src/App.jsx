@@ -8,6 +8,7 @@ import Registration from './pages/Registration';
 import TeacherRegistration from './pages/TeacherRegistration';
 import TeacherDashboard from './pages/TeacherDashboard';
 import StudentDashboard from './pages/StudentDashboard';
+import SessionHistory from './pages/SessionHistory';
 
 const PrivateRoute = ({ children, role }) => {
   const { user } = useAuth();
@@ -32,6 +33,12 @@ const App = () => {
           <Route path="/teacher/dashboard" element={
             <PrivateRoute role="teacher">
               <TeacherDashboard />
+            </PrivateRoute>
+          } />
+
+          <Route path="/teacher/session-history" element={
+            <PrivateRoute role="teacher">
+              <SessionHistory />
             </PrivateRoute>
           } />
 

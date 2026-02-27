@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import {
     Users, MapPin, Clock, LogOut, Zap, Play, Square,
     ShieldCheck, Smartphone, LayoutDashboard, Activity,
-    CheckCircle2, Lock, Radio, BarChart3, ChevronDown, ChevronUp, History,
+    CheckCircle2, Lock, Radio, History,
     Crosshair, MousePointer2, AlertTriangle, Save, X, Loader2
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
@@ -41,9 +41,6 @@ const TeacherDashboard = () => {
     const [timeLeft, setTimeLeft] = useState(0);
     const [stats, setStats] = useState({ presentCount: 0 });
     const [pulse, setPulse] = useState(true);
-    const [sessionHistory, setSessionHistory] = useState([]);
-    const [expandedSession, setExpandedSession] = useState(null);
-    const [sessionStudents, setSessionStudents] = useState({});
     const [showSecurityLogs, setShowSecurityLogs] = useState(false);
     const [windowWidth, setWindowWidth] = useState(window.innerWidth);
     const [manualLocation, setManualLocation] = useState(null); // {lat, lng}
@@ -87,32 +84,7 @@ const TeacherDashboard = () => {
         setActiveSession(null);
         setTimeLeft(0);
         setStats({ presentCount: 0 });
-        fetchHistory();
     }, []);
-
-    const fetchHistory = useCallback(async () => {
-        try {
-            const res = await fetch(`${API}/api/sessions/history`, {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-            });
-            const data = await res.json();
-            if (Array.isArray(data)) setSessionHistory(data);
-        } catch (e) { console.error(e); }
-    }, []);
-
-    // Security logs checks removed.
-
-
-    const fetchSessionStudents = useCallback(async (sessionId) => {
-        if (sessionStudents[sessionId]) return; // already loaded
-        try {
-            const res = await fetch(`${API}/api/sessions/${sessionId}/students`, {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-            });
-            const data = await res.json();
-            setSessionStudents(prev => ({ ...prev, [sessionId]: Array.isArray(data) ? data : [] }));
-        } catch (e) { console.error(e); }
-    }, [sessionStudents]);
 
     const calibrateLocation = async () => {
         setCalibrating(true);
@@ -130,7 +102,6 @@ const TeacherDashboard = () => {
     };
 
     useEffect(() => {
-        fetchHistory();
         // Auto-fetch location when dashboard opens
         if (navigator.geolocation && !isDemoMode && !manualLocation) {
             setCalibrating(true);
@@ -254,9 +225,29 @@ const TeacherDashboard = () => {
                             {!isTiny && <div style={{ fontSize: '0.65rem', color: '#6366f1', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>GeoAttend System</div>}
                         </div>
                     </div>
-                    <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: isMobile ? '0.4rem 0.8rem' : '0.5rem 1.1rem', borderRadius: '10px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', fontWeight: 700, fontSize: isMobile ? '0.75rem' : '0.875rem', cursor: 'pointer' }}>
-                        <LogOut size={14} /> Logout
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <button
+                            onClick={() => navigate('/teacher/session-history')}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: isMobile ? '0.4rem 0.8rem' : '0.5rem 1.1rem',
+                                borderRadius: '10px',
+                                background: '#f0f4ff',
+                                color: '#4f46e5',
+                                border: '1px solid #dbeafe',
+                                fontWeight: 700,
+                                fontSize: isMobile ? '0.75rem' : '0.875rem',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <History size={14} /> Session History
+                        </button>
+                        <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: isMobile ? '0.4rem 0.8rem' : '0.5rem 1.1rem', borderRadius: '10px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', fontWeight: 700, fontSize: isMobile ? '0.75rem' : '0.875rem', cursor: 'pointer' }}>
+                            <LogOut size={14} /> Logout
+                        </button>
+                    </div>
                 </div>
             </nav>
 
@@ -468,93 +459,7 @@ const TeacherDashboard = () => {
 
                 {/* Security Center section removed */}
 
-                {/* ── HISTORICAL LOGS ── */}
-                <div style={{ marginBottom: '5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                        <History size={24} color="#4f46e5" />
-                        <h2 style={{ fontSize: isMobile ? '1.25rem' : '1.5rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>Session Archives</h2>
-                        <button onClick={fetchHistory} style={{ marginLeft: 'auto', background: 'white', border: '1px solid #d1d5db', padding: '0.5rem 1rem', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}>Refresh</button>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        {sessionHistory.map(s => {
-                            const isExpanded = expandedSession === s.id;
-                            const isActive = s.status === 'active' && new Date(s.expiry_time) > new Date();
-                            const students = sessionStudents[s.id] || [];
-
-                            return (
-                                <div key={s.id} style={{ background: 'white', borderRadius: '24px', border: `1.5px solid ${isActive ? '#86efac' : '#e2e8f0'}`, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)', transition: 'transform 0.2s' }}>
-                                    <div
-                                        onClick={() => { if (isExpanded) setExpandedSession(null); else { setExpandedSession(s.id); fetchSessionStudents(s.id); } }}
-                                        style={{ padding: '1.25rem 1.75rem', display: 'flex', alignItems: 'center', gap: '1.25rem', cursor: 'pointer', flexWrap: isMobile ? 'wrap' : 'nowrap' }}
-                                    >
-                                        <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: isActive ? '#ecfdf5' : '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <Users size={24} color={isActive ? '#10b981' : '#94a3b8'} />
-                                        </div>
-                                        <div style={{ flex: 1 }}>
-                                            <div style={{ fontWeight: 800, color: '#1e293b', fontSize: '1rem' }}>{s.subject || 'Session'} • {s.branch}-{s.section}</div>
-                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.2rem' }}>{new Date(s.start_time).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })} • {new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                                        </div>
-                                        <div style={{ textAlign: 'center', minWidth: '80px' }}>
-                                            <div style={{ fontSize: '1.5rem', fontWeight: 900, color: '#4f46e5', lineHeight: 1 }}>{s.present_count}</div>
-                                            <div style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 700 }}>Present</div>
-                                        </div>
-                                        {isExpanded ? <ChevronUp size={20} color="#94a3b8" /> : <ChevronDown size={20} color="#94a3b8" />}
-                                    </div>
-
-                                    {isExpanded && (
-                                        <div style={{ padding: '1.5rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
-                                            {students.length === 0 ? (
-                                                <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.9rem', fontWeight: 600 }}>Updating records...</p>
-                                            ) : (
-                                                /* Responsive Table to Cards */
-                                                isMobile ? (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                                        {students.map((r, idx) => (
-                                                            <div key={r.id} style={{ background: 'white', padding: '1rem', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                                <div>
-                                                                    <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>{idx + 1}. {r.students?.name}</div>
-                                                                    <div style={{ fontSize: '0.75rem', color: '#6366f1', fontWeight: 700 }}>{r.students?.roll_no}</div>
-                                                                    <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{new Date(r.timestamp).toLocaleTimeString()}</div>
-                                                                </div>
-                                                                <div style={{ background: '#ecfdf5', color: '#10b981', padding: '0.3rem 0.6rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 900 }}>{parseFloat(r.distance).toFixed(1)}m</div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>
-                                                                <th style={{ padding: '0.75rem 1rem' }}>#</th>
-                                                                <th style={{ padding: '0.75rem 1rem' }}>Name</th>
-                                                                <th style={{ padding: '0.75rem 1rem' }}>Roll Number</th>
-                                                                <th style={{ padding: '0.75rem 1rem' }}>Distance</th>
-                                                                <th style={{ padding: '0.75rem 1rem' }}>Verified At</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {students.map((r, idx) => (
-                                                                <tr key={r.id} style={{ borderTop: '1px solid #e2e8f0', fontSize: '0.85rem' }}>
-                                                                    <td style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '0.75rem 1rem', fontWeight: 700 }}>{r.students?.name}</td>
-                                                                    <td style={{ padding: '0.75rem 1rem', color: '#4f46e5', fontWeight: 700 }}>{r.students?.roll_no}</td>
-                                                                    <td style={{ padding: '0.75rem 1rem' }}>
-                                                                        <span style={{ padding: '0.2rem 0.5rem', background: '#ecfdf5', color: '#10b981', borderRadius: '6px', fontWeight: 800, fontSize: '0.75rem' }}>{parseFloat(r.distance).toFixed(1)}m</span>
-                                                                    </td>
-                                                                    <td style={{ padding: '0.75rem 1rem', color: '#64748b' }}>{new Date(r.timestamp).toLocaleTimeString()}</td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                )
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
+                {/* Security Center section removed */}
             </div>
 
             {/* Map Picker Modal */}

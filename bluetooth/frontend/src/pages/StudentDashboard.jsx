@@ -150,7 +150,13 @@ const StudentDashboard = () => {
             const demoLat = activeSession.teacher_lat + 0.00004; // ~4m north
             const demoLng = activeSession.teacher_lng;
             const d = getDistance(activeSession.teacher_lat, activeSession.teacher_lng, demoLat, demoLng);
-            setLiveLocation({ lat: demoLat, lng: demoLng });
+
+            // Fix: Only update state if values changed to prevent infinite loops
+            if (!liveLocation || liveLocation.lat !== demoLat || liveLocation.lng !== demoLng) {
+                setLiveLocation({ lat: demoLat, lng: demoLng });
+                setLocationAccuracy(10);
+            }
+
             setLiveDistance(d);
             setGpsStatus('ok');
             return;
@@ -200,11 +206,18 @@ const StudentDashboard = () => {
                     // "No Glitch" Protocol: Force a fresh, high-priority location lock on click only if we don't have a good lock
                     toast.loading('Locking onto GPS satellites...', { id: 'gps-lock' });
                     try {
-                        loc = await getCurrentLocation(); // Forced fresh read (maxAge: 0)
+                        loc = await getCurrentLocation(); // Forced fresh read
                         toast.success('Location locked!', { id: 'gps-lock' });
                     } catch (err) {
-                        toast.error('GPS Error: Please ensure Location is ON and high-accuracy is enabled.', { id: 'gps-lock' });
-                        throw err;
+                        // Fallback: If hardware timed out but we have a background location, use it!
+                        if (liveLocation && (err.code === 3 || err.message.includes('Timeout'))) {
+                            console.warn('GPS hardware timed out. Using last known background location.');
+                            toast.success('Using last known location!', { id: 'gps-lock' });
+                            loc = { lat: liveLocation.lat, lng: liveLocation.lng, accuracy: locationAccuracy || 50 };
+                        } else {
+                            toast.error('GPS Error: Please ensure Location is ON and high-accuracy is enabled.', { id: 'gps-lock' });
+                            throw err;
+                        }
                     }
                 }
             }
@@ -237,7 +250,7 @@ const StudentDashboard = () => {
                     lat: loc.lat,
                     lng: loc.lng,
                     accuracy: loc.accuracy || 0,
-                    deviceId: localStorage.getItem('deviceId')
+                    deviceId: localStorage.getItem('deviceId') || 'DEMO_DEVICE_' + user?.id
                 })
             });
             const data = await res.json();
@@ -251,10 +264,18 @@ const StudentDashboard = () => {
             }
         } catch (err) {
             console.error('Attendance error:', err);
-            if (err.message && err.message.includes('Location')) {
+
+            // Specifically handle Geolocation errors
+            if (err.code === 1) {
+                setError('Location access denied. Please go to your browser settings and allow location access for this site.');
+            } else if (err.code === 2) {
+                setError('Location unavailable. GPS signal is weak. Try moving near a window or outdoors.');
+            } else if (err.code === 3) {
+                setError('Location request timed out. Please try again or refresh the page.');
+            } else if (err.message && err.message.includes('Location')) {
                 setError(err.message);
             } else {
-                setError('System Error: Communication failed.');
+                setError('System Error: ' + (err.message || 'Communication failed. Check your network or server.'));
             }
         } finally {
             setMarking(false);
@@ -298,9 +319,27 @@ const StudentDashboard = () => {
                             {!isTiny && <div style={{ fontSize: '0.65rem', color: '#6366f1', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>GeoAttend System</div>}
                         </div>
                     </div>
-                    <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: isMobile ? '0.4rem 0.8rem' : '0.5rem 1.1rem', borderRadius: '10px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', fontWeight: 700, fontSize: isMobile ? '0.75rem' : '0.875rem', cursor: 'pointer' }}>
-                        <LogOut size={14} /> Logout
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <button
+                            onClick={() => setIsDemoMode(!isDemoMode)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                padding: isMobile ? '0.4rem 0.8rem' : '0.5rem 1.1rem',
+                                borderRadius: '10px',
+                                background: isDemoMode ? '#4f46e5' : '#f8fafc',
+                                color: isDemoMode ? 'white' : '#64748b',
+                                border: '1px solid #e2e8f0',
+                                fontWeight: 700, fontSize: isMobile ? '0.7rem' : '0.8rem',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            <Zap size={14} /> {isDemoMode ? 'Demo ON' : 'Demo OFF'}
+                        </button>
+                        <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: isMobile ? '0.4rem 0.8rem' : '0.5rem 1.1rem', borderRadius: '10px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', fontWeight: 700, fontSize: isMobile ? '0.75rem' : '0.875rem', cursor: 'pointer' }}>
+                            <LogOut size={14} /> Logout
+                        </button>
+                    </div>
                 </div>
             </nav>
 

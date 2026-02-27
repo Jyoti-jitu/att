@@ -21,7 +21,7 @@ export function getCurrentLocation() {
             return;
         }
 
-        // Try high-accuracy first (20s timeout)
+        // Try high-accuracy first (30s timeout)
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 resolve({
@@ -42,13 +42,13 @@ export function getCurrentLocation() {
                             });
                         },
                         (err) => reject(err),
-                        { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 }
+                        { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
                     );
                 } else {
                     reject(error);
                 }
             },
-            { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+            { enableHighAccuracy: true, timeout: 30000, maximumAge: 10000 }
         );
     });
 }

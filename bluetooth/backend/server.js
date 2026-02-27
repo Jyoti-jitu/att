@@ -494,7 +494,7 @@ app.get('/api/sessions/active', verifyToken, async (req, res) => {
 
 // Mark Attendance (Student)
 app.post('/api/attendance/mark', verifyToken, async (req, res) => {
-    const { session_id, otp, lat, lng, accuracy, deviceId } = req.body
+    const { session_id, otp, lat, lng, rssi, accuracy, deviceId } = req.body
     const student_id = req.user.id
     const incoming_session_token = req.user.session_token
 
@@ -590,39 +590,82 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         })
     }
 
-    // 5. Mark Attendance
-    const record = {
-        session_id, student_id,
-        student_lat: lat, student_lng: lng,
-        distance, status: 'present'
+    // --- Build Payload Dynamically ---
+    // Start with the required fields
+    const payload = {
+        session_id,
+        student_id,
+        status: 'present',
+        // GUARANTEED SAFE DEFAULT VALUES to satisfy strict database constraints
+        student_lat: 0,
+        student_lng: 0,
+        distance: 0,
+        rssi: -100
+    };
+
+    // Override defaults with real values if they are valid
+    const finalLat = parseFloat(lat);
+    const finalLng = parseFloat(lng);
+    if (!isNaN(finalLat) && !isNaN(finalLng)) {
+        payload.student_lat = finalLat;
+        payload.student_lng = finalLng;
     }
+
+    let finalDistance = parseFloat(distance);
+    if (!isNaN(finalDistance)) payload.distance = finalDistance;
+
+    let finalRssi = parseInt(rssi);
+    if (!isNaN(finalRssi)) payload.rssi = finalRssi;
 
     if (supabase) {
-        // Try full insert first
-        let { data, error } = await supabase.from('attendance_records').insert([record]).select()
+        console.log('📝 Attempting to mark attendance payload:', payload);
 
-        // If 'distance' column is missing in DB cache, retry without it
-        if (error && (error.message.includes('column') || error.message.includes('schema cache'))) {
-            const { distance: _, ...baseRecord } = record
-            const retry = await supabase.from('attendance_records').insert([baseRecord]).select()
-            if (retry.error) return res.status(400).json({ error: retry.error.message })
-            return res.json({ message: 'Attendance marked present! (Legacy Schema)', record: retry.data[0] })
-        }
+        // Fix: Removed .select() so PostgREST doesn't try to parse output and crash due to stale cache.
+        let { error } = await supabase.from('attendance_records').insert(payload);
 
         if (error) {
-            if (error.code === '23505') return res.status(400).json({ error: 'Attendance already marked' })
+            console.error("Supabase Insert Error:", error.message);
+            // If it's a unique constraint violation
+            if (error.code === '23505') return res.status(400).json({ error: 'Attendance already marked' });
+
+            // If it's a schema/column error (like PostgREST cache)
+            if (error.message.includes('column') || error.message.includes('schema cache') || error.message.includes('rssi')) {
+                console.warn("⚠️ Schema caching error. Retrying with stripped payload...");
+
+                // Create a slimmed-down fallback payload, but still include distance and coordinates
+                // so it doesn't violate the NOT NULL constraints you had previously.
+                const fallbackPayload = {
+                    session_id,
+                    student_id,
+                    status: 'present',
+                    student_lat: payload.student_lat,
+                    student_lng: payload.student_lng,
+                    distance: payload.distance
+                };
+
+                const retry = await supabase.from('attendance_records').insert(fallbackPayload);
+
+                if (retry.error) {
+                    console.error("Critical insert failure after fallback:", retry.error);
+                    return res.status(400).json({ error: retry.error.message });
+                }
+                return res.json({ message: 'Attendance marked present! (Fallback Payload)', record: fallbackPayload });
+            }
+
             return res.status(400).json({ error: error.message })
         }
-        return res.json({ message: 'Attendance marked present!', record: data[0] })
+
+        return res.json({ message: 'Attendance marked present!', record: payload });
     } else {
         if (mockRecords.some(r => r.session_id === session_id && r.student_id === student_id)) {
-            return res.status(400).json({ error: 'Attendance already marked' })
+            return res.status(400).json({ error: 'Attendance already marked' });
         }
-        record.id = Date.now().toString()
-        mockRecords.push(record)
-        return res.json({ message: 'Attendance marked present! (Mock Mode)', record })
+
+        const mockRecord = { ...payload, id: Date.now().toString() };
+        mockRecords.push(mockRecord);
+        return res.json({ message: 'Attendance marked present! (Mock Mode)', record: mockRecord });
     }
-})
+});
 
 // Close / Terminate Session (Teacher)
 app.post('/api/sessions/:id/close', verifyToken, async (req, res) => {
@@ -689,6 +732,95 @@ app.get('/api/sessions/history', verifyToken, async (req, res) => {
             present_count: mockRecords.filter(r => r.session_id === s.id).length
         }))
         return res.json(history)
+    }
+})
+
+// Detailed History with Filters (New)
+app.get('/api/sessions/detailed-history', verifyToken, async (req, res) => {
+    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Forbidden' })
+
+    const { branch, section, semester, date } = req.query
+    const teacher_id = req.user.id
+
+    try {
+        if (supabase) {
+            let query = supabase.from('attendance_sessions')
+                .select(`
+                    *,
+                    attendance_records(
+                        *,
+                        students(id, name, roll_no)
+                    )
+                `)
+                .eq('teacher_id', teacher_id)
+
+            if (branch) query = query.eq('branch', branch)
+            if (section) query = query.eq('section', section)
+            if (semester) query = query.eq('semester', semester)
+            if (date) {
+                const startDate = new Date(date)
+                const endDate = new Date(date)
+                endDate.setDate(endDate.getDate() + 1)
+                query = query.gte('start_time', startDate.toISOString()).lt('start_time', endDate.toISOString())
+            }
+
+            const { data, error } = await query.order('start_time', { ascending: false })
+            if (error) throw error
+
+            // Calculate real totals for each session criteria
+            const sessionsWithTotals = await Promise.all(data.map(async (s) => {
+                // Count students matching this session's criteria
+                const { count } = await supabase
+                    .from('students')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('branch', s.branch)
+                    .eq('section', s.section)
+                    .eq('semester', s.semester)
+
+                return {
+                    ...s,
+                    total_students: count || 0,
+                    records: s.attendance_records || []
+                }
+            }))
+
+            return res.json({ sessions: sessionsWithTotals })
+        } else {
+            // Mock Mode Logic
+            let filteredSessions = mockSessions.filter(s => s.teacher_id === teacher_id)
+
+            if (branch) filteredSessions = filteredSessions.filter(s => s.branch === branch)
+            if (section) filteredSessions = filteredSessions.filter(s => s.section === section)
+            if (semester) filteredSessions = filteredSessions.filter(s => s.semester === semester)
+            if (date) {
+                filteredSessions = filteredSessions.filter(s => s.start_time.startsWith(date))
+            }
+
+            const sessionsWithRecords = filteredSessions.map(s => {
+                const records = mockRecords.filter(r => r.session_id === s.id).map(r => {
+                    const student = mockStudents.find(st => st.id === r.student_id)
+                    return { ...r, students: student }
+                })
+
+                // Count mock students matching criteria
+                const studentCount = mockStudents.filter(st =>
+                    st.branch === s.branch &&
+                    st.section === s.section &&
+                    st.semester === s.semester
+                ).length
+
+                return {
+                    ...s,
+                    total_students: studentCount,
+                    records
+                }
+            })
+
+            return res.json({ sessions: sessionsWithRecords })
+        }
+    } catch (error) {
+        console.error('Detailed History Error:', error)
+        res.status(500).json({ error: 'Failed to fetch detailed history' })
     }
 })
 
