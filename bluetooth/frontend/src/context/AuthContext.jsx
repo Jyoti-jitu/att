@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API } from '../lib/api';
 
 const AuthContext = createContext();
 
@@ -17,7 +18,6 @@ export const AuthProvider = ({ children }) => {
     const refreshUser = async () => {
         if (!token) return;
         try {
-            const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
             const res = await fetch(`${API}/api/auth/me`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -32,7 +32,6 @@ export const AuthProvider = ({ children }) => {
     const logout = async () => {
         try {
             if (token) {
-                const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
                 await fetch(`${API}/api/auth/logout`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` }

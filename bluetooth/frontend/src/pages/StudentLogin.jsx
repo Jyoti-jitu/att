@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { MapPin, Users, Mail, Eye, EyeOff, AlertCircle, ArrowLeft, GraduationCap, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+import { API } from '../lib/api';
 
 const DEMO_ACCOUNTS = [
     { name: 'Arjun Sharma', email: 'arjun@student.edu', password: 'student123' },

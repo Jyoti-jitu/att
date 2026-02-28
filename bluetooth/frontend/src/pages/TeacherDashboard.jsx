@@ -23,7 +23,7 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+import { API } from '../lib/api';
 
 const TeacherDashboard = () => {
     const { logout, isDemoMode, setIsDemoMode, user } = useAuth();

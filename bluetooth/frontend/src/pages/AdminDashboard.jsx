@@ -9,7 +9,7 @@ import {
 import { getSessions, getAttendanceRecords } from '../lib/supabase'
 import toast from 'react-hot-toast'
 
-const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+import { API } from '../lib/api';
 
 function ScanPulse() {
     return (

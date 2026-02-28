@@ -11,7 +11,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { GITA_LOGO } from '../utils/logoBase64';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { API } from '../lib/api';
 
 const SessionHistory = () => {
     const { logout } = useAuth();
