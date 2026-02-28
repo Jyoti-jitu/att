@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Mail, Lock, LogIn, ArrowLeft, ShieldCheck, GraduationCap, Laptop, UserCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 
 const Login = () => {
     const { role } = useParams(); // 'teacher' or 'student'

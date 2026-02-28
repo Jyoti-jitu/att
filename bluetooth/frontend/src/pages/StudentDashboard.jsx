@@ -11,7 +11,7 @@ import {
 import toast from 'react-hot-toast';
 import { getDeviceFingerprint } from '../lib/deviceIdentity';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 
 const StudentDashboard = () => {
     const { user, logout, isDemoMode, refreshUser } = useAuth();

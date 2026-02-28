@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { User, ShieldCheck, Mail, Phone, Lock, ArrowRight, Check, Key, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
 
 const TeacherRegistration = () => {
     const navigate = useNavigate();

@@ -12,7 +12,24 @@ const app = express()
 const PORT = process.env.PORT || 5000
 
 // --- Middleware ---
-app.use(cors({ origin: '*', credentials: false }))
+// Robust CORS for production
+app.use(cors({
+    origin: '*', // Allows all origins, change to your specific frontend URL for better security
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false
+}))
+
+// Middleware to neutralize double slashes which break CORS preflights on Vercel
+app.use((req, res, next) => {
+    if (req.path.includes('//')) {
+        const cleanPath = req.path.replace(/\/+/g, '/');
+        console.log(`[CORS-FIX] Normalizing path: ${req.path} -> ${cleanPath}`);
+        req.url = cleanPath;
+    }
+    next();
+});
+
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
