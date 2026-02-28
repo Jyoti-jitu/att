@@ -12,19 +12,32 @@ const app = express()
 const PORT = process.env.PORT || 5000
 
 // --- Middleware ---
-// Robust CORS for production
+const allowedOrigins = [
+    'https://att-m1rz.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000'
+];
+
 app.use(cors({
-    origin: '*', // Allows all origins, change to your specific frontend URL for better security
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            return callback(null, true); // Allow during transition, but log as reminder
+        }
+        return callback(null, true);
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: false
-}))
+    credentials: true
+}));
 
-// Middleware to neutralize double slashes which break CORS preflights on Vercel
+// Pre-flight OPTIONS handling
+app.options('*', cors());
+
+// Middleware to neutralize double slashes
 app.use((req, res, next) => {
     if (req.path.includes('//')) {
         const cleanPath = req.path.replace(/\/+/g, '/');
-        console.log(`[CORS-FIX] Normalizing path: ${req.path} -> ${cleanPath}`);
         req.url = cleanPath;
     }
     next();

@@ -1,2 +1,2 @@
-// Centralized API URL — supports mobile testing via local network IP
-export const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+// Centralized API URL — supports local testing and Vercel Rewrites
+export const API = import.meta.env.VITE_API_URL || '';
