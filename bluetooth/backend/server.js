@@ -167,6 +167,84 @@ const resend = new Resend(resendApiKey)
 const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev'
 // Note: If you have a verified domain, set SENDER_EMAIL in .env to an email at that domain.
 const otpStore = new Map() // email -> { otp, expiry }
+const sessionTimeouts = new Map() // sessionId -> timeoutHandle
+
+// --- Automated Absence Notification Service ---
+const notifyAbsentees = async (sessionId, branch, section, semester, subject) => {
+    try {
+        console.log(`\n[AUTO-NOTIFY] Session ${sessionId} ended. Checking for absentees...`);
+
+        const isResendConfigured = process.env.RESEND_API_KEY &&
+            process.env.RESEND_API_KEY !== 're_YOUR_RESEND_KEY_HERE';
+
+        let absentees = [];
+        let studentsList = [];
+
+        if (supabase) {
+            const { data: students } = await supabase.from('students').select('id, name, email')
+                .eq('branch', branch).eq('section', section).eq('semester', semester);
+            const { data: records } = await supabase.from('attendance_records').select('student_id').eq('session_id', sessionId);
+            const attendedIds = new Set((records || []).map(r => r.student_id));
+            absentees = (students || []).filter(s => !attendedIds.has(s.id));
+        } else {
+            studentsList = mockStudents.filter(s => s.branch === branch && s.section === section && s.semester == semester);
+            const attendedIds = new Set(mockRecords.filter(r => r.session_id === sessionId).map(r => r.student_id));
+            absentees = studentsList.filter(s => !attendedIds.has(s.id));
+        }
+
+        if (absentees.length === 0) {
+            console.log(`[AUTO-NOTIFY] 100% attendance for ${subject}! No emails required.`);
+            return;
+        }
+
+        if (!isResendConfigured) {
+            console.log('--------------------------------------------------');
+            console.log('[AUTO-NOTIFY] RESEND NOT CONFIGURED (DEV MODE)');
+            console.log(`[AUTO-NOTIFY] Detected ${absentees.length} absentees for ${subject}:`);
+            absentees.forEach(s => console.log(`   - ${s.name} (${s.email})`));
+            console.log('--------------------------------------------------');
+            return;
+        }
+
+        console.log(`[AUTO-NOTIFY] Found ${absentees.length} absentees. Dispatching alerts...`);
+
+        // 3. Send emails
+        for (const student of absentees) {
+            try {
+                await resend.emails.send({
+                    from: `Attendance Alert <${SENDER_EMAIL}>`,
+                    to: student.email,
+                    subject: `Absence Notification: ${subject}`,
+                    html: `
+                        <div style="font-family: 'Inter', sans-serif; max-width: 500px; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background: white;">
+                            <div style="background: #fef2f2; padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 6px solid #ef4444;">
+                                <h1 style="margin: 0; font-size: 20px; color: #991b1b;">Absence Alert</h1>
+                                <p style="margin: 5px 0 0 0; font-size: 14px; color: #dc2626;">Smart Attendance Verification System</p>
+                            </div>
+                            <p style="font-size: 15px; color: #1e293b;">Hello <b>${student.name}</b>,</p>
+                            <p style="color: #475569; line-height: 1.5; font-size: 14px;">Our system has recorded you as <b>ABSENT</b> for the following session:</p>
+                            
+                            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #f1f5f9;">
+                                <p style="margin: 0; font-size: 18px; font-weight: 800; color: #0f172a;">${subject}</p>
+                                <p style="margin: 4px 0 0 0; font-size: 13px; color: #64748b;">Date: ${new Date().toLocaleDateString()}</p>
+                            </div>
+
+                            <p style="font-size: 13px; color: #ef4444; font-weight: 600;">⚠️ Absence from lectures may impact your internal grades and exam eligibility.</p>
+                            
+                            <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 20px 0;">
+                            <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">This is an automated notification. Please contact your HOD for corrections.</p>
+                        </div>
+                    `
+                });
+            } catch (emailErr) {
+                console.error(`[AUTO-NOTIFY] Error mailing ${student.email}:`, emailErr.message);
+            }
+        }
+        console.log(`[AUTO-NOTIFY] Monitoring complete for Session ${sessionId}`);
+    } catch (err) {
+        console.error('[AUTO-NOTIFY] Service Error:', err);
+    }
+};
 
 // PDF Report Dispatching
 app.post('/api/reports/send-email', async (req, res) => {
@@ -511,22 +589,111 @@ app.post('/api/sessions/start', verifyToken, async (req, res) => {
 
             // Map columns back to what the frontend expects
             const row = retryData[0];
-            return res.json({
+            const finalSession = {
                 ...row,
                 teacher_lat: row.teacher_lat || row.lat || lat,
                 teacher_lng: row.teacher_lng || row.lng || lng,
                 subject,
                 semester,
                 section
-            });
+            };
+
+            // Schedule post-session absence alert
+            const delayInMs = (durationMins * 60 * 1000) + 10000;
+            const timeoutHandle = setTimeout(() => {
+                notifyAbsentees(row.id, branch, section, semester, subject);
+                sessionTimeouts.delete(row.id);
+            }, delayInMs);
+            sessionTimeouts.set(row.id, timeoutHandle);
+
+            return res.json(finalSession);
         }
 
-        return res.json(data[0])
+        const row = data[0];
+
+        // Schedule post-session absence alert
+        const delayInMs = (durationMins * 60 * 1000) + 10000;
+        const timeoutHandle = setTimeout(() => {
+            notifyAbsentees(row.id, branch, section, semester, subject || 'Lecture');
+            sessionTimeouts.delete(row.id);
+        }, delayInMs);
+        sessionTimeouts.set(row.id, timeoutHandle);
+
+        return res.json({
+            ...row,
+            teacher_lat: row.teacher_lat || lat,
+            teacher_lng: row.teacher_lng || lng,
+            subject,
+            semester,
+            section
+        })
     } else {
-        session.id = Date.now().toString()
-        mockSessions.push(session)
-        return res.json(session)
+        const mockRow = {
+            id: 'mock-sess-' + Date.now(),
+            teacher_id: req.user.id,
+            branch, section, semester, subject,
+            otp,
+            start_time: startTime.toISOString(),
+            expiry_time: expiryTime.toISOString(),
+            teacher_lat: lat,
+            teacher_lng: lng,
+            status: 'active'
+        }
+        mockSessions.push(mockRow)
+
+        // Schedule post-session absence alert (Mock Mode)
+        const delayInMs = (durationMins * 60 * 1000) + 5000;
+        const timeoutHandle = setTimeout(() => {
+            notifyAbsentees(mockRow.id, branch, section, semester, subject || 'Lecture');
+            sessionTimeouts.delete(mockRow.id);
+        }, delayInMs);
+        sessionTimeouts.set(mockRow.id, timeoutHandle);
+
+        return res.json(mockRow)
     }
+})
+
+// Cancel Session (Teacher deletes erroneous entry)
+app.delete('/api/sessions/:id/cancel', verifyToken, async (req, res) => {
+    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Forbidden' });
+    const { id } = req.params;
+
+    // 1. Clear scheduled notification
+    if (sessionTimeouts.has(id)) {
+        clearTimeout(sessionTimeouts.get(id));
+        sessionTimeouts.delete(id);
+        console.log(`[SESSION] Cancelled scheduled email alert for session ${id}`);
+    }
+
+    if (supabase) {
+        await supabase.from('attendance_records').delete().eq('session_id', id);
+        const { error } = await supabase.from('attendance_sessions').delete().eq('id', id);
+        if (error) return res.status(400).json({ error: error.message });
+    } else {
+        mockSessions = mockSessions.filter(s => s.id !== id);
+        mockRecords = mockRecords.filter(r => r.session_id !== id);
+    }
+    res.json({ success: true, message: 'Session cancelled successfully' });
+})
+
+// Manual Absence Notification Trigger (Teacher)
+app.post('/api/sessions/:id/resend-alerts', verifyToken, async (req, res) => {
+    if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Forbidden' });
+    const { id } = req.params;
+
+    let sessionData;
+    if (supabase) {
+        const { data } = await supabase.from('attendance_sessions').select('*').eq('id', id).single();
+        sessionData = data;
+    } else {
+        sessionData = mockSessions.find(s => s.id === id);
+    }
+
+    if (!sessionData) return res.status(404).json({ error: 'Session not found' });
+
+    // Execute notification immediately
+    notifyAbsentees(id, sessionData.branch, sessionData.section, sessionData.semester, sessionData.subject || 'Lecture');
+    res.json({ success: true, message: 'Absence alerts are being processed.' });
 })
 
 

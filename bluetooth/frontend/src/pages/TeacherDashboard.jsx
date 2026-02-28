@@ -455,9 +455,34 @@ const TeacherDashboard = () => {
                             </div>
                         </div>
 
-                        <button onClick={() => terminateSession(activeSession.id)} style={{ width: '100%', height: '58px', background: '#fef2f2', border: '2px solid #fecaca', color: '#ef4444', borderRadius: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}>
-                            <Square size={20} fill="currentColor" /> Finish Session Early
-                        </button>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <button
+                                onClick={() => terminateSession(activeSession.id)}
+                                style={{ height: '58px', background: '#f8fafc', border: '2px solid #e2e8f0', color: '#64748b', borderRadius: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}
+                            >
+                                <Square size={18} fill="currentColor" /> Finish Early
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    if (window.confirm('Are you sure? This session and its records will be PERMANENTLY DELETED and no absence emails will be sent.')) {
+                                        try {
+                                            const res = await fetch(`${API}/api/sessions/${activeSession.id}/cancel`, {
+                                                method: 'DELETE',
+                                                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                                            });
+                                            if (res.ok) {
+                                                toast.success('Session discarded successfully.');
+                                                setActiveSession(null);
+                                                setTimeLeft(0);
+                                            }
+                                        } catch (err) { toast.error('Error cancelling session'); }
+                                    }
+                                }}
+                                style={{ height: '58px', background: '#fef2f2', border: '2px solid #fecaca', color: '#ef4444', borderRadius: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}
+                            >
+                                <X size={20} /> Cancel Session
+                            </button>
+                        </div>
                     </div>
                 )}
 
