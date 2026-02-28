@@ -1,0 +1,8 @@
+# Root Gitignore
+**/node_modules/
+**/.env
+**/.env.local
+**/dist/
+**/.vercel/
+.DS_Store
+Thumbs.db
