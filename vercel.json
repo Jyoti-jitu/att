@@ -1,0 +1,35 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "bluetooth/backend/server.js",
+            "use": "@vercel/node"
+        },
+        {
+            "src": "package.json",
+            "use": "@vercel/static-build",
+            "config": {
+                "distDir": "bluetooth/frontend/dist"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "bluetooth/backend/server.js"
+        },
+        {
+            "src": "/assets/(.*)",
+            "dest": "bluetooth/frontend/dist/assets/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "bluetooth/frontend/dist/$1",
+            "continue": true
+        },
+        {
+            "src": "/(.*)",
+            "dest": "bluetooth/frontend/dist/index.html"
+        }
+    ]
+}

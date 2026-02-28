@@ -1,0 +1,9 @@
+{
+    "name": "geoattend-monorepo",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "build": "cd bluetooth/frontend && npm install && npm run build"
+    },
+    "dependencies": {}
+}
