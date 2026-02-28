@@ -13,7 +13,8 @@ const PORT = process.env.PORT || 5000
 
 // --- Middleware ---
 app.use(cors({ origin: '*', credentials: false }))
-app.use(express.json())
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
 // --- Health Check ---
 app.get('/', (req, res) => {
@@ -159,10 +160,60 @@ let mockRecords = []
 
 // --- Email Config (Resend) ---
 const { Resend } = require('resend')
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Safe initialization: Only initialize if a key is provided, or pass a dummy key
+const resendApiKey = process.env.RESEND_API_KEY || 're_dummy_key_to_prevent_crash'
+const resend = new Resend(resendApiKey)
+
 const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev'
 // Note: If you have a verified domain, set SENDER_EMAIL in .env to an email at that domain.
 const otpStore = new Map() // email -> { otp, expiry }
+
+// PDF Report Dispatching
+app.post('/api/reports/send-email', async (req, res) => {
+    const { to, subject, body, pdfBase64, filename } = req.body;
+
+    if (!to || !pdfBase64) {
+        return res.status(400).json({ error: 'Missing recipient email or PDF data' });
+    }
+
+    const isResendConfigured = process.env.RESEND_API_KEY && process.env.RESEND_API_KEY !== 're_YOUR_RESEND_KEY_HERE';
+
+    if (isResendConfigured) {
+        try {
+            console.log(`[REPORTS] Sending PDF to ${to}`);
+
+            // Clean up base64 string if it contains the data uri prefix
+            const base64Data = pdfBase64.includes('base64,') ? pdfBase64.split('base64,')[1] : pdfBase64;
+
+            const { data, error } = await resend.emails.send({
+                from: `GeoAttend <${SENDER_EMAIL}>`,
+                to,
+                subject: subject || 'Attendance Report',
+                html: body || '<p>Please find the attached attendance report.</p>',
+                attachments: [
+                    {
+                        filename: filename || 'AttendanceReport.pdf',
+                        content: base64Data
+                    }
+                ]
+            });
+
+            if (error) {
+                console.error('[REPORTS] Resend API Error:', error);
+                return res.status(500).json({ error: error.message });
+            }
+
+            console.log(`[REPORTS] Success: ${data.id}`);
+            return res.json({ message: 'Email sent successfully!', id: data.id });
+        } catch (err) {
+            console.error('[REPORTS] Unhandled Error:', err);
+            return res.status(500).json({ error: 'Internal server error sending email' });
+        }
+    } else {
+        console.log(`[DEV MODE] Mock email with PDF attachment to ${to}`);
+        return res.json({ message: 'Email sent in Mock Mode (check console).' });
+    }
+});
 
 // Registration (Student)
 app.post('/api/auth/send-otp', async (req, res) => {
