@@ -6,9 +6,10 @@ import {
     User, Smartphone, Wifi, MapPin, ShieldCheck, LogOut, Zap,
     Target, CheckCircle2, AlertCircle, Loader2, Clock, BookOpen,
     Navigation, Radio, XCircle, Lock, GraduationCap, Users, Crosshair,
-    RefreshCw, Printer
+    RefreshCw, Printer, AlertTriangle, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getDeviceFingerprint } from '../lib/deviceIdentity';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -82,17 +83,28 @@ const StudentDashboard = () => {
             const res = await fetch(`${API}/api/sessions/active`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
             });
-            const data = await res.json();
-            setActiveSession(data);
-            if (data?.expiry_time) {
-                const secs = Math.max(0, Math.floor((new Date(data.expiry_time) - new Date()) / 1000));
-                setSessionTimeLeft(secs);
-            } else {
-                setLiveDistance(null);
-                setGpsStatus('idle');
+            if (!res.ok) {
+                setActiveSession(null);
+                setLoading(false);
+                return;
             }
-        } catch (err) { console.error(err); }
-        finally { setLoading(false); }
+            const data = await res.json();
+            // If API returns {error: ...} or empty, treat as no session
+            if (!data || data.error) {
+                setActiveSession(null);
+            } else {
+                setActiveSession(data);
+                if (data.expiry_time) {
+                    const secs = Math.max(0, Math.floor((new Date(data.expiry_time) - new Date()) / 1000));
+                    setSessionTimeLeft(secs);
+                }
+            }
+        } catch (err) {
+            console.error(err);
+            setActiveSession(null);
+        } finally {
+            setLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -223,21 +235,23 @@ const StudentDashboard = () => {
             if (isDemoMode) {
                 loc = { lat: activeSession.teacher_lat + 0.00004, lng: activeSession.teacher_lng, accuracy: 10 };
             } else {
-                if (liveLocation && locationAccuracy < 30 && gpsStatus !== 'scanning' && gpsStatus !== 'error') {
+                // OPTIMIZATION: If our background tracker (watchPosition) already has a High-Accuracy lock (< 35m)
+                // and it's within range, use it IMMEDIATELY instead of waiting for a new getCurrentPosition() call.
+                if (liveLocation && locationAccuracy && locationAccuracy < 35 && gpsStatus === 'ok') {
+                    console.log('[GPS] Using background high-accuracy lock:', locationAccuracy);
                     loc = { lat: liveLocation.lat, lng: liveLocation.lng, accuracy: locationAccuracy };
                 } else {
-                    toast.loading('Locking onto GPS satellites...', { id: 'gps-lock' });
+                    // Force a fresh read if background tracking is stale or inaccurate
+                    toast.loading('Optimizing GPS precision...', { id: 'gps-lock' });
                     try {
-                        loc = await getCurrentLocation(); // Forced fresh read
-                        toast.success('Location locked!', { id: 'gps-lock' });
+                        loc = await getCurrentLocation(); // Fresh hardware read
+                        toast.success('Position optimized!', { id: 'gps-lock' });
                     } catch (err) {
-                        // Fallback: If hardware timed out but we have a background location, use it!
-                        if (liveLocation && (err.code === 3 || err.message.includes('Timeout'))) {
-                            console.warn('GPS hardware timed out. Using last known background location.');
-                            toast.success('Using last known location!', { id: 'gps-lock' });
+                        if (liveLocation) {
+                            console.warn('GPS hardware lock failed. Falling back to background sensor.');
+                            toast.success('Using secondary sensor!', { id: 'gps-lock' });
                             loc = { lat: liveLocation.lat, lng: liveLocation.lng, accuracy: locationAccuracy || 50 };
                         } else {
-                            toast.error('GPS Error: Please ensure Location is ON and high-accuracy is enabled.', { id: 'gps-lock' });
                             throw err;
                         }
                     }
@@ -245,19 +259,25 @@ const StudentDashboard = () => {
             }
 
             const dist = getDistance(activeSession.teacher_lat, activeSession.teacher_lng, loc.lat, loc.lng);
+            const teacherAcc = activeSession.teacher_accuracy || 0;
+            const effectiveDist = Math.max(0, dist - loc.accuracy - teacherAcc);
+
+            // Sync UI states with latest reading
             setDistance(dist);
             setLiveDistance(dist);
             setLocationAccuracy(loc.accuracy);
             setLiveLocation({ lat: loc.lat, lng: loc.lng });
 
-            const effectiveDist = Math.max(0, dist - (loc.accuracy || 0));
-            if (effectiveDist > 50) {
-                const err = `Location mismatch. You are approx. ${dist.toFixed(0)}m away.`;
+            // Clientside soft-check (matches backend logic)
+            if (effectiveDist > 65) { // Slightly more generous buffer (65m vs 50m) to account for indoor drift
+                const err = `Outside range (${dist.toFixed(0)}m). Please move closer to the professor.`;
                 setError(err);
                 toast.error(err);
                 setMarking(false);
                 return;
             }
+
+            const fingerprint = getDeviceFingerprint();
 
             const res = await fetch(`${API}/api/attendance/mark`, {
                 method: 'POST',
@@ -271,7 +291,11 @@ const StudentDashboard = () => {
                     lat: loc.lat,
                     lng: loc.lng,
                     accuracy: loc.accuracy || 0,
-                    deviceId: localStorage.getItem('deviceId') || 'DEMO_DEVICE_' + user?.id
+                    deviceFingerprint: fingerprint.fingerprint,
+                    deviceDetails: {
+                        platform: fingerprint.platform,
+                        screenRes: fingerprint.screenRes
+                    }
                 })
             });
             const data = await res.json();
@@ -383,6 +407,9 @@ const StudentDashboard = () => {
                                         </div>
                                     </div>
                                 ))}
+                                <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#fff7ed', borderRadius: '10px', border: '1px solid #ffedd5', fontSize: '0.6rem', color: '#9a3412', fontFamily: 'monospace' }}>
+                                    DEBUG Fingerprint: {getDeviceFingerprint().fingerprint.slice(0, 8)}...
+                                </div>
                             </div>
                             <div style={{ marginTop: '1.25rem', padding: '0.35rem', background: '#f1f5f9', borderRadius: '16px', display: 'flex', gap: '0.35rem' }}>
                                 <button onClick={() => setActiveTab('attendance')} style={{ flex: 1, padding: '0.8rem', border: 'none', background: activeTab === 'attendance' ? '#4f46e5' : 'transparent', color: activeTab === 'attendance' ? 'white' : '#64748b', borderRadius: '12px', fontWeight: 800, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', transition: 'all 0.2s', boxShadow: activeTab === 'attendance' ? '0 4px 12px rgba(79, 70, 229, 0.25)' : 'none' }}>
@@ -393,15 +420,73 @@ const StudentDashboard = () => {
                                 </button>
                             </div>
                         </div>
-                        <div style={{ background: gps.bg, border: `2px solid ${gps.border}`, borderRadius: '20px', padding: '1.5rem', transition: 'all 0.4s' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                                {gps.icon}
-                                <div style={{ fontWeight: 800, color: gps.text, fontSize: '0.95rem' }}>{gpsStatus.toUpperCase()}</div>
+                        {/* ─── Premium Geo-Fence Card (NEW) ─── */}
+                        <div style={{
+                            background: 'white',
+                            borderRadius: '24px',
+                            padding: '1.5rem',
+                            border: '1px solid #e2e8f0',
+                            marginBottom: '1.5rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '1.25rem',
+                            position: 'relative',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.02)'
+                        }}>
+                            <div style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '50%',
+                                background: gpsStatus === 'ok' ? '#ecfdf5' : '#fff7ed',
+                                border: `1.5px solid ${gpsStatus === 'ok' ? '#10b981' : '#f59e0b'}`,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}>
+                                <MapPin size={24} color={gpsStatus === 'ok' ? '#10b981' : '#f59e0b'} />
                             </div>
-                            {liveDistance !== null && (
-                                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: gps.text }}>Distance: <strong>{liveDistance.toFixed(1)}m</strong></div>
-                            )}
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.2rem' }}>Geo-Fence Status</div>
+                                <div style={{ fontSize: '1.25rem', fontWeight: 900, color: gpsStatus === 'ok' ? '#059669' : '#d97706', marginBottom: '0.75rem' }}>
+                                    {liveDistance !== null ? `${liveDistance.toFixed(1)}m from classroom` : 'Locating...'}
+                                </div>
+
+                                {/* Proximity Progress Bar (Visual relative to 50m) */}
+                                <div style={{ height: '6px', background: '#f1f5f9', borderRadius: '3px', position: 'relative', overflow: 'hidden', marginBottom: '0.5rem' }}>
+                                    <div style={{
+                                        position: 'absolute',
+                                        left: 0, top: 0, bottom: 0,
+                                        width: liveDistance !== null ? `${Math.min(100, Math.max(5, (1 - (liveDistance / 50)) * 100))}%` : '0%',
+                                        background: gpsStatus === 'ok' ? 'linear-gradient(90deg, #10b981, #34d399)' : '#f59e0b',
+                                        transition: 'width 0.5s ease-out'
+                                    }} />
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem', color: '#64748b', fontWeight: 700 }}>
+                                    <span style={{ color: '#10b981' }}>✅ Allowed zone:</span> within <strong>50 meters</strong> of teacher
+                                </div>
+                            </div>
                         </div>
+
+                        {/* GPS Accuracy Warning Notice */}
+                        {locationAccuracy > 30 && activeTab === 'attendance' && (
+                            <div style={{
+                                background: '#fffbeb',
+                                border: '1px solid #fef3c7',
+                                borderRadius: '16px',
+                                padding: '1rem',
+                                marginBottom: '1.5rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem'
+                            }}>
+                                <div style={{ width: '28px', height: '28px', background: '#fef3c7', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                    <AlertTriangle size={16} color="#d97706" />
+                                </div>
+                                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#92400e', lineHeight: '1.4' }}>
+                                    Low GPS accuracy (±{locationAccuracy.toFixed(0)}m). Move to an open area for accurate verification.
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div>
@@ -437,11 +522,11 @@ const StudentDashboard = () => {
                                                     <div style={{ color: '#4ade80', fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.05em', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                                         <div style={{ width: '6px', height: '6px', background: '#4ade80', borderRadius: '50%' }} /> LIVE SESSION
                                                     </div>
-                                                    <div style={{ fontSize: '1.75rem', fontWeight: 900, marginBottom: '0.5rem' }}>{activeSession.subject}</div>
+                                                    <div style={{ fontSize: '1.75rem', fontWeight: 900, marginBottom: '0.5rem' }}>{activeSession?.subject || 'Unknown Class'}</div>
                                                     <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                                                        <span style={{ fontSize: '0.75rem', fontWeight: 800, background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '0.3rem 0.8rem', borderRadius: '10px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>Section {activeSession.section}</span>
-                                                        <span style={{ fontSize: '0.75rem', fontWeight: 800, background: 'rgba(255, 255, 255, 0.08)', color: 'white', padding: '0.3rem 0.8rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.15)' }}>{activeSession.branch}</span>
-                                                        <span style={{ fontSize: '0.75rem', fontWeight: 800, background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '0.3rem 0.8rem', borderRadius: '10px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>Sem {activeSession.semester}</span>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 800, background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '0.3rem 0.8rem', borderRadius: '10px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>Section {activeSession?.section || 'N/A'}</span>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 800, background: 'rgba(255, 255, 255, 0.08)', color: 'white', padding: '0.3rem 0.8rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.15)' }}>{activeSession?.branch || 'General'}</span>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 800, background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '0.3rem 0.8rem', borderRadius: '10px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>Sem {activeSession?.semester || '?'}</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -458,7 +543,7 @@ const StudentDashboard = () => {
                                         <div style={{ background: 'white', borderRadius: '24px', padding: isMobile ? '1.5rem' : '2.5rem', boxShadow: '0 6px 30px rgba(0,0,0,0.05)' }}>
                                             <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
                                                 <h2 style={{ fontSize: '1.75rem', fontWeight: 900, color: '#1e293b', marginBottom: '0.25rem' }}>Active Session Found</h2>
-                                                <p style={{ color: '#64748b', fontSize: '0.95rem' }}>{activeSession.subject} with Prof. Teacher</p>
+                                                <p style={{ color: '#64748b', fontSize: '0.95rem' }}>{activeSession?.subject || 'Lecture'} with Prof. Teacher</p>
                                             </div>
 
                                             {success ? (
@@ -468,50 +553,79 @@ const StudentDashboard = () => {
                                                 </div>
                                             ) : (
                                                 <>
-                                                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                                                        <div style={{ background: '#f0fdf4', border: '1px solid #dcfce7', borderRadius: '16px', padding: '1.25rem', textAlign: 'center' }}>
-                                                            <Clock size={20} color="#0ea5e9" style={{ margin: '0 auto 0.5rem' }} />
-                                                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#0ea5e9', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Time Left</div>
-                                                            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#0ea5e9' }}>{formatTime(sessionTimeLeft)}</div>
-                                                        </div>
-                                                        <div style={{ background: '#f5f3ff', border: '1px solid #ede9fe', borderRadius: '16px', padding: '1.25rem', textAlign: 'center' }}>
-                                                            <Crosshair size={20} color="#6366f1" style={{ margin: '0 auto 0.5rem' }} />
-                                                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#6366f1', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Target GPS</div>
-                                                            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#6366f1' }}>50 meters</div>
-                                                        </div>
-                                                        <div style={{ background: '#faf5ff', border: '1px solid #f3e8ff', borderRadius: '16px', padding: '1.25rem', textAlign: 'center' }}>
-                                                            <Users size={20} color="#a855f7" style={{ margin: '0 auto 0.5rem' }} />
-                                                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#a855f7', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>ID Verification</div>
-                                                            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#a855f7' }}>Active Code</div>
-                                                        </div>
-                                                    </div>
-
-                                                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '16px', padding: '1.25rem', textAlign: 'center', marginBottom: '1.5rem' }}>
-                                                        <MapPin size={20} color="#ef4444" style={{ margin: '0 auto 0.5rem' }} />
-                                                        <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#ef4444', letterSpacing: '0.05em', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Classroom Anchor Point (Verified)</div>
-                                                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#991b1b' }}>{activeSession.teacher_lat?.toFixed(6) || '20.226613'}°, {activeSession.teacher_lng?.toFixed(6) || '85.730935'}°</div>
-                                                    </div>
-
                                                     {gpsStatus === 'ok' ? (
-                                                        <>
-                                                            <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                                                                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#4f46e5', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>VERIFICATION CODE</div>
-                                                                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                                                                    {otp.map((digit, i) => (
-                                                                        <input key={i} ref={el => otpRefs.current[i] = el} type="text" maxLength="1" value={digit} onChange={e => handleOtpChange(i, e.target.value)} style={{ width: isMobile ? '40px' : '55px', height: isMobile ? '50px' : '65px', borderRadius: '12px', border: '1px solid #e2e8f0', textAlign: 'center', fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', background: 'white' }} />
-                                                                    ))}
-                                                                </div>
+                                                        <div style={{ textAlign: 'center', marginTop: '1rem', borderTop: '1px solid #f1f5f9', paddingTop: '2rem' }}>
+                                                            <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#64748b', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                                <Lock size={14} /> ENTER 6-DIGIT VERIFICATION CODE
                                                             </div>
-                                                            <button onClick={handleMarkAttendance} disabled={marking} style={{ width: '100%', padding: '1rem', background: marking ? '#cbd5e1' : '#2563eb', color: 'white', borderRadius: '12px', fontWeight: 800, border: 'none', cursor: marking ? 'not-allowed' : 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem', transition: 'background 0.2s' }}>
-                                                                {marking && <Loader2 size={20} className="animate-spin" />}
-                                                                {marking ? 'Processing...' : 'Mark Present'}
+
+                                                            {/* Modern OTP Input Grid */}
+                                                            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginBottom: '2.5rem' }}>
+                                                                {otp.map((digit, i) => (
+                                                                    <input
+                                                                        key={i}
+                                                                        ref={el => otpRefs.current[i] = el}
+                                                                        type="text"
+                                                                        maxLength="1"
+                                                                        value={digit}
+                                                                        onChange={e => handleOtpChange(i, e.target.value)}
+                                                                        onKeyDown={e => {
+                                                                            if (e.key === 'Backspace' && !digit && i > 0) otpRefs.current[i - 1]?.focus();
+                                                                        }}
+                                                                        style={{
+                                                                            width: isMobile ? '46px' : '60px',
+                                                                            height: isMobile ? '56px' : '72px',
+                                                                            borderRadius: '14px',
+                                                                            border: digit ? '2px solid #4f46e5' : '2px solid #e2e8f0',
+                                                                            background: digit ? '#f5f3ff' : 'white',
+                                                                            textAlign: 'center',
+                                                                            fontSize: '1.8rem',
+                                                                            fontWeight: 900,
+                                                                            color: '#1e293b',
+                                                                            boxShadow: digit ? '0 4px 12px rgba(79, 70, 229, 0.1)' : 'none',
+                                                                            transition: 'all 0.2s ease',
+                                                                            outline: 'none'
+                                                                        }}
+                                                                    />
+                                                                ))}
+                                                            </div>
+
+                                                            {/* Premium Confirm Button */}
+                                                            <button
+                                                                onClick={handleMarkAttendance}
+                                                                disabled={marking || otp.some(d => !d)}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    height: '64px',
+                                                                    background: (marking || otp.some(d => !d)) ? '#94a3b8' : 'linear-gradient(135deg, #4f46e5 0%, #2563eb 100%)',
+                                                                    color: 'white',
+                                                                    borderRadius: '18px',
+                                                                    fontWeight: 800,
+                                                                    border: 'none',
+                                                                    cursor: (marking || otp.some(d => !d)) ? 'not-allowed' : 'pointer',
+                                                                    display: 'flex',
+                                                                    justifyContent: 'center',
+                                                                    alignItems: 'center',
+                                                                    gap: '0.75rem',
+                                                                    fontSize: '1.15rem',
+                                                                    boxShadow: (marking || otp.some(d => !d)) ? 'none' : '0 8px 24px rgba(37, 99, 235, 0.3)',
+                                                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                                                                }}
+                                                            >
+                                                                {marking ? <Loader2 size={24} className="animate-spin" /> : <div style={{ width: '24px', height: '24px', border: '2px solid white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ width: '8px', height: '8px', background: 'white', borderRadius: '50%' }} /></div>}
+                                                                {marking ? 'Validating...' : 'Confirm Attendance'}
                                                             </button>
-                                                            <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.75rem', color: '#94a3b8' }}>Your GPS location will be checked against the classroom zone</div>
-                                                        </>
+
+                                                            <p style={{ marginTop: '1.5rem', color: '#94a3b8', fontSize: '0.8rem', fontWeight: 500 }}>
+                                                                Your GPS location will be checked against the classroom zone
+                                                            </p>
+                                                        </div>
                                                     ) : (
-                                                        <div style={{ textAlign: 'center', padding: '2rem' }}>
-                                                            <MapPin size={40} color="#ef4444" style={{ margin: '0 auto 1rem' }} />
-                                                            <p style={{ color: '#64748b' }}>Move closer to classroom to unlock.</p>
+                                                        <div style={{ textAlign: 'center', padding: '3.5rem 2rem', background: '#f8fafc', borderRadius: '24px', border: '1px dashed #e2e8f0', marginTop: '1.25rem' }}>
+                                                            <div style={{ width: '64px', height: '64px', background: 'white', border: '1px solid #e2e8f0', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+                                                                <MapPin size={32} color="#cbd5e1" />
+                                                            </div>
+                                                            <p style={{ color: '#64748b', fontWeight: 600, fontSize: '0.95rem' }}>Move closer to the classroom to unlock the attendance verification portal.</p>
                                                         </div>
                                                     )}
                                                 </>

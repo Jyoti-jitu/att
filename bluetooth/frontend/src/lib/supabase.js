@@ -160,6 +160,7 @@ export async function markAttendance({ sessionId, studentName, rollNumber, rssi,
             rssi,
             distance_m: distance,
             status,
+            device_fingerprint: deviceInfo?.fingerprint || null
         })
         .select()
         .single()

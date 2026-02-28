@@ -415,33 +415,61 @@ app.post('/api/sessions/start', verifyToken, async (req, res) => {
     if (timeSlot) session.time_slot = timeSlot
 
     if (supabase) {
-        // Try full insert first
+        // Try to insert with full set of columns
         let { data, error } = await supabase.from('attendance_sessions').insert([session]).select()
 
-        if (error && (error.message.includes('column') || error.message.includes('schema cache'))) {
-            // Fallback 1: Retain semester & subject, but drop the newest non-critical columns like teacher_accuracy
-            const fallback1 = { ...session };
-            delete fallback1.teacher_accuracy;
+        if (error) {
+            console.warn(`[SESSION] Primary insert failed: ${error.message}. Retrying with minimal payload...`);
 
-            let retry1 = await supabase.from('attendance_sessions').insert([fallback1]).select();
-
-            if (retry1.error) {
-                // Fallback 2: Drop absolutely everything except the bare minimum requirements in case DB is very old
-                const fallback最低 = {
-                    branch, section, teacher_id: req.user.id, teacher_lat: lat, teacher_lng: lng, otp,
-                    start_time: startTime.toISOString(), expiry_time: expiryTime.toISOString(), status: 'active'
-                };
-
-                const lowest = await supabase.from('attendance_sessions').insert([fallback最低]).select();
-                if (lowest.error) return res.status(400).json({ error: lowest.error.message });
-                // Serve logical overlay back to frontend
-                return res.json({ ...lowest.data[0], semester, subject, time_slot: timeSlot, teacher_id: req.user.id });
+            // Fallback: If 'teacher_lat' doesn't exist, try 'lat'
+            const fallback_session = { ...session };
+            if (error.message.includes('teacher_lat') || error.message.includes('lat')) {
+                fallback_session.lat = lat;
+                fallback_session.lng = lng;
+                delete fallback_session.teacher_lat;
+                delete fallback_session.teacher_lng;
             }
-            // Add omitted properties sequentially for the UI
-            return res.json(retry1.data[0]);
+
+            // Remove non-critical columns that might be missing in older schemas
+            delete fallback_session.teacher_accuracy;
+            delete fallback_session.teacher_rssi;
+            delete fallback_session.time_slot;
+            delete fallback_session.status;
+
+            console.log('[SESSION] Metadata retry payload:', Object.keys(fallback_session));
+
+            const { data: retryData, error: retryError } = await supabase.from('attendance_sessions').insert([fallback_session]).select();
+
+            if (retryError) {
+                console.error('[SESSION] Critical insert failure:', retryError.message);
+                // Last ditch effort: Just the basics
+                const extreme_fallback = {
+                    teacher_id: session.teacher_id,
+                    branch: session.branch,
+                    section: session.section,
+                    subject: session.subject || 'Lecture',
+                    lat: lat,
+                    lng: lng,
+                    otp: session.otp,
+                    expiry_time: session.expiry_time
+                };
+                const { data: lastData, error: lastError } = await supabase.from('attendance_sessions').insert([extreme_fallback]).select();
+                if (lastError) return res.status(400).json({ error: lastError.message });
+                retryData = lastData;
+            }
+
+            // Map columns back to what the frontend expects
+            const row = retryData[0];
+            return res.json({
+                ...row,
+                teacher_lat: row.teacher_lat || row.lat || lat,
+                teacher_lng: row.teacher_lng || row.lng || lng,
+                subject,
+                semester,
+                section
+            });
         }
 
-        if (error) return res.status(400).json({ error: error.message })
         return res.json(data[0])
     } else {
         session.id = Date.now().toString()
@@ -482,6 +510,12 @@ app.get('/api/sessions/active', verifyToken, async (req, res) => {
             isMatch(s.semester, semester)
         ) || null
 
+        if (session) {
+            // Normalize columns for frontend
+            session.teacher_lat = session.teacher_lat || session.lat;
+            session.teacher_lng = session.teacher_lng || session.lng;
+        }
+
         return res.json(session)
     } else {
         const isMatch = (s1, s2) => {
@@ -501,6 +535,12 @@ app.get('/api/sessions/active', verifyToken, async (req, res) => {
             s.status === 'active' &&
             new Date(s.expiry_time) > now
         )
+
+        if (session) {
+            session.teacher_lat = session.teacher_lat || session.lat;
+            session.teacher_lng = session.teacher_lng || session.lng;
+        }
+
         return res.json(session || null)
     }
 })
@@ -562,9 +602,14 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         const { data, error } = await supabase.from('attendance_sessions').select('*').eq('id', session_id).single()
         if (error || !data) return res.status(404).json({ error: 'Session not found' })
         session = data
+        // Normalize columns for calculation
+        session.teacher_lat = session.teacher_lat || session.lat;
+        session.teacher_lng = session.teacher_lng || session.lng;
     } else {
         session = mockSessions.find(s => s.id === session_id)
         if (!session) return res.status(404).json({ error: 'Session not found' })
+        session.teacher_lat = session.teacher_lat || session.lat;
+        session.teacher_lng = session.teacher_lng || session.lng;
     }
 
     // 2. Check Expiry
@@ -577,7 +622,51 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         return res.status(400).json({ error: 'Invalid OTP' })
     }
 
-    // 4. Verify Location (Accuracy-Aware Geo-fence)
+    // --- Build Payload Dynamically with Anti-Proxy Check ---
+    const device_fingerprint = req.body.deviceFingerprint;
+    const ip_address = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    console.log(`[ATTENDANCE] Incoming Request - Student: ${student_id}, Session: ${session_id}, Fingerprint: ${device_fingerprint}`);
+
+    // 4.5. Anti-Proxy Check: Check if this device has already marked attendance for someone else IN THIS SESSION
+    if (device_fingerprint) {
+        if (supabase) {
+            const { data: fingerprintData, error: fingerprintError } = await supabase
+                .from('attendance_records')
+                .select('student_id')
+                .eq('session_id', session_id)
+                .eq('device_fingerprint', device_fingerprint)
+                .neq('student_id', student_id) // used for another student
+                .limit(1);
+
+            if (fingerprintError) {
+                console.warn(`[ATTENDANCE] Fingerprint check DB error: ${fingerprintError.message}. (Migration likely missing)`);
+            }
+
+            if (fingerprintData && fingerprintData.length > 0) {
+                console.log(`[ATTENDANCE] Blocked Proxy Trial: Device ${device_fingerprint} already used by Student ID: ${fingerprintData[0].student_id}`);
+                return res.status(403).json({
+                    error: 'DEVICE ALREADY USED: This mobile device has already been used by another student for this session. One device per student only.'
+                });
+            }
+        } else {
+            const used = mockRecords.find(r =>
+                r.session_id === session_id &&
+                r.device_fingerprint === device_fingerprint &&
+                r.student_id !== student_id
+            );
+            if (used) {
+                console.log(`[ATTENDANCE] Blocked Mock Proxy Trial: Device ${device_fingerprint} already used by Student ID: ${used.student_id}`);
+                return res.status(403).json({
+                    error: 'DEVICE ALREADY USED (Mock): This mobile device has already been used for another student.'
+                });
+            }
+        }
+    } else {
+        console.warn(`[ATTENDANCE] Warning: No deviceFingerprint provided in request body.`);
+    }
+
+    // 4.6. Verify Location (Accuracy-Aware Geo-fence)
     const GEOFENCE_RADIUS = 50  // meters — practical for indoor mobile GPS
     const distance = getDistance(session.teacher_lat, session.teacher_lng, lat, lng)
     const gpsAccuracy = parseFloat(accuracy) || 0  // student's GPS accuracy in meters
@@ -606,6 +695,8 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
         session_id,
         student_id,
         status: 'present',
+        device_fingerprint,
+        ip_address,
         // GUARANTEED SAFE DEFAULT VALUES to satisfy strict database constraints
         student_lat: 0,
         student_lng: 0,
@@ -639,8 +730,9 @@ app.post('/api/attendance/mark', verifyToken, async (req, res) => {
             if (error.code === '23505') return res.status(400).json({ error: 'Attendance already marked' });
 
             // If it's a schema/column error (like PostgREST cache)
-            if (error.message.includes('column') || error.message.includes('schema cache') || error.message.includes('rssi')) {
-                console.warn("⚠️ Schema caching error. Retrying with stripped payload...");
+            if (error.message.includes('column') || error.message.includes('schema cache') ||
+                error.message.includes('rssi') || error.message.includes('fingerprint') || error.message.includes('ip_address')) {
+                console.warn("⚠️ Schema/Anti-Proxy column missing. Retrying with stripped payload...");
 
                 // Create a slimmed-down fallback payload, but still include distance and coordinates
                 // so it doesn't violate the NOT NULL constraints you had previously.
