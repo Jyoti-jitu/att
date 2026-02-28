@@ -438,7 +438,7 @@ app.post('/api/sessions/start', verifyToken, async (req, res) => {
 
             console.log('[SESSION] Metadata retry payload:', Object.keys(fallback_session));
 
-            const { data: retryData, error: retryError } = await supabase.from('attendance_sessions').insert([fallback_session]).select();
+            let { data: retryData, error: retryError } = await supabase.from('attendance_sessions').insert([fallback_session]).select();
 
             if (retryError) {
                 console.error('[SESSION] Critical insert failure:', retryError.message);
