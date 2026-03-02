@@ -1,0 +1,17 @@
+{
+    "version": 2,
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "https://geoattend-xi.vercel.app/api/$1"
+        },
+        {
+            "src": "/assets/(.*)",
+            "dest": "/assets/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/index.html"
+        }
+    ]
+}
